@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, create_engine, select
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, create_engine, select, text as sql_text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 
@@ -121,6 +121,15 @@ def init_database(urls_file: Path | None = None) -> None:
             url = line.strip()
             if url and not url.startswith("#"):
                 ensure_website(url, source_name="Imported website")
+
+
+def database_is_ready() -> bool:
+    try:
+        with _engine.connect() as connection:
+            connection.execute(sql_text("SELECT 1"))
+        return True
+    except Exception:
+        return False
 
 
 def normalized_url(value: str) -> str:

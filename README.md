@@ -1,5 +1,8 @@
 # OpenAudit Hub
 
+[![CI](https://github.com/kate666kate/openaudit-hub/actions/workflows/ci.yml/badge.svg)](https://github.com/kate666kate/openaudit-hub/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 **Open-source website governance for accessibility, SEO, quality assurance, and performance.**
 
 **面向无障碍、SEO、质量保证与性能管理的开源网站治理平台。**
@@ -82,6 +85,11 @@ docker compose up -d --build postgres redis portal scan-worker scan-scheduler
 ```text
 http://localhost:9090
 ```
+
+Operational health endpoints:
+
+- Liveness: `http://localhost:9090/health/live`
+- Readiness, including the database check: `http://localhost:9090/health/ready`
 
 Optional standalone tools:
 
@@ -253,6 +261,11 @@ docker compose up -d --build postgres redis portal scan-worker scan-scheduler
 ```text
 http://localhost:9090
 ```
+
+运行状态检查：
+
+- 进程存活状态：`http://localhost:9090/health/live`
+- 就绪状态（包含数据库检查）：`http://localhost:9090/health/ready`
 
 如需启动独立的 Pa11y Dashboard 和 Lighthouse CI：
 

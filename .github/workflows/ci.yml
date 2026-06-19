@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: services/portal/requirements.txt
+      - name: Install portal dependencies
+        run: pip install -r services/portal/requirements.txt
+      - name: Compile Python sources
+        run: python -m compileall -q services tests scripts/crawl-sitemaps.py
+      - name: Run tests
+        run: python -m unittest discover -s tests -v
+      - name: Validate Docker Compose
+        run: docker compose config --quiet
+      - name: Check committed runtime data
+        shell: bash
+        run: |
+          if git ls-files | grep -E '(^|/)(\.env|.*\.db|__pycache__|reports/.+)$'; then
+            echo "Runtime data or secrets must not be committed."
+            exit 1
+          fi
