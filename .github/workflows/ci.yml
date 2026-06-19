@@ -22,6 +22,8 @@ jobs:
         run: pip install -r services/portal/requirements.txt
       - name: Compile Python sources
         run: python -m compileall -q services tests scripts/crawl-sitemaps.py
+      - name: Validate browser JavaScript
+        run: node --check services/portal/static/app.js
       - name: Run tests
         run: python -m unittest discover -s tests -v
       - name: Validate Docker Compose

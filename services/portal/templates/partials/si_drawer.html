@@ -1,20 +1,23 @@
 <aside class="si-sidebar">
-  <label class="si-search">
-    <input placeholder="Search in menu" aria-label="Search in menu" readonly>
-    <span>Search</span>
-  </label>
+  <div class="si-menu-search-wrap">
+    <label class="si-search" for="si-menu-search">
+      <input id="si-menu-search" type="search" placeholder="Search tools and pages" aria-label="Search tools and pages" aria-controls="si-menu-search-results" aria-expanded="false" autocomplete="off">
+      <kbd>Ctrl K</kbd>
+    </label>
+    <div id="si-menu-search-results" class="si-search-results si-menu-search-results" role="listbox" aria-label="Navigation search results" hidden></div>
+  </div>
 
   <nav class="si-menu si-menu-tree" aria-label="Main navigation">
-    <a class="{% if active_slug == 'dashboard' %}active {% endif %}si-menu-top" href="/">Dashboard</a>
-    <a class="{% if active_slug == 'websites' %}active {% endif %}si-menu-top" href="/websites">Websites</a>
-    <a class="{% if active_slug == 'scans' %}active {% endif %}si-menu-top" href="/scans">Scans</a>
+    <a class="{% if active_slug == 'dashboard' %}active {% endif %}si-menu-top" href="/" data-search-group="Overview">Dashboard</a>
+    <a class="{% if active_slug == 'websites' %}active {% endif %}si-menu-top" href="/websites" data-search-group="Management">Websites</a>
+    <a class="{% if active_slug == 'scans' %}active {% endif %}si-menu-top" href="/scans" data-search-group="Management">Scans</a>
 
     {% for group in module_nav %}
     <details class="si-menu-section" {% if group.open %}open{% endif %}>
       <summary>{{ group.group }}{% if group.badge %}<em>{{ group.badge }}</em>{% endif %}</summary>
       <div>
         {% for item in group["items"] %}
-        <a class="{% if item.active %}active{% endif %}" href="/modules/{{ item.slug }}{% if selected_site_key %}?site={{ selected_site_key }}{% endif %}">{{ item.title }}</a>
+        <a class="{% if item.active %}active{% endif %}" href="/modules/{{ item.slug }}{% if selected_site_key %}?site={{ selected_site_key }}{% endif %}" data-search-group="{{ group.group }}" data-search-keywords="{{ item.slug|replace('-', ' ') }}">{{ item.title }}</a>
         {% endfor %}
       </div>
     </details>
