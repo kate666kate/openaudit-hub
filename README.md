@@ -1,250 +1,137 @@
-# OpenAudit Stack
+# OpenAudit Hub
 
-一个完全开源、可容器化的“类 Siteimprove”基础方案，面向政府、教育、企业站点的持续质量巡检。
+**Open-source website governance for accessibility, SEO, quality assurance, and performance.**
 
-它不是单一产品的复刻，而是把几类顶级开源能力组合成一个统一的 Docker 项目：
+**面向无障碍、SEO、质量保证与性能管理的开源网站治理平台。**
 
-- `Pa11y Dashboard`：持续无障碍巡检、历史结果、团队可视化
-- `Lighthouse CI Server`：SEO、性能、最佳实践、Accessibility 趋势
-- `Oobee`（原 Purple A11y）：全站深度爬取式无障碍审计
-- `LinkChecker`：死链与可达性检查
-- `OpenAudit Hub`：统一入口页，汇总导航、目标页面和最近报告
+[English](#english) | [简体中文](#简体中文)
 
-## 定位
+OpenAudit Hub combines proven open-source scanners with one operational dashboard. It is designed for teams that need a self-hosted, transparent alternative to commercial website-governance platforms such as Siteimprove.
 
-这个仓库更像一套“开源审计平台底座”：
+OpenAudit Hub 将成熟的开源扫描工具整合到统一的管理平台中，适合需要自行部署、数据透明，并希望替代 Siteimprove 等商业网站治理平台的团队。
 
-- 日常巡检：`Pa11y Dashboard`
-- 质量评分与趋势：`Lighthouse CI`
-- 深度整站审计：`Oobee`
-- 补充链路检查：`LinkChecker`
+---
 
-如果你后续要补齐 Siteimprove 的“内容质量”和“拼写治理”，建议再接入：
+## English
 
-- `Vale`：编辑规范、语气、拼写、术语一致性
-- `write-good` / `textlint`：英文内容质量
-- `LanguageTool`：多语言语法与拼写
-- `Matomo` 或 `Plausible`：站点访问数据分析
+### What OpenAudit does
 
-## 架构
+- Manages multiple websites from one dashboard.
+- Crawls sitemaps and same-domain internal links.
+- Runs Lighthouse audits for performance, SEO, accessibility, and best practices.
+- Runs Pa11y WCAG checks with selectors, HTML evidence, and practical remediation guidance.
+- Detects broken links and keeps a page inventory.
+- Tracks findings through open, assigned, in-progress, resolved, ignored, and reopened states.
+- Schedules long-running scans with Celery and Redis instead of blocking web requests.
+- Stores websites, scan jobs, crawl data, and issue history in PostgreSQL.
+- Extracts content keywords with YAKE and optionally enriches them with Google Search Console CSV data.
+- Retains native Lighthouse HTML/JSON reports and historical score trends.
+
+### Open-source components
+
+| Component | Purpose |
+| --- | --- |
+| OpenAudit Hub | Unified dashboard, website management, issues, guidance, and trends |
+| Lighthouse / Lighthouse CI | Performance, SEO, accessibility, and best-practice audits |
+| Pa11y / Pa11y Dashboard | WCAG accessibility testing and monitoring |
+| Oobee (formerly Purple A11y) | Deep, crawl-based accessibility audits |
+| LinkChecker | Broken-link validation |
+| PostgreSQL | Operational and historical data |
+| Redis + Celery | Background jobs and scheduled scans |
+| YAKE | Local keyword extraction |
+| Matomo / Mautic | Optional analytics and marketing integrations |
+
+### Architecture
 
 ```mermaid
 flowchart LR
-  A["Editors / QA / Dev Team"] --> B["Pa11y Dashboard"]
-  A --> C["Lighthouse CI Server"]
-  A --> D["Oobee On-demand Scan"]
-  A --> E["LinkChecker On-demand Scan"]
-  A --> I["OpenAudit Hub"]
-  B --> F["MongoDB"]
-  C --> G["SQLite Volume"]
-  D --> H["ZIP / HTML Reports"]
-  E --> H
-  I --> H
-  I --> B
-  I --> C
+  U["Content, QA, SEO and development teams"] --> H["OpenAudit Hub"]
+  H --> Q["Celery and Redis"]
+  Q --> C["Crawler"]
+  Q --> L["Lighthouse"]
+  Q --> P["Pa11y"]
+  Q --> K["LinkChecker / Oobee"]
+  C --> D["PostgreSQL"]
+  L --> D
+  P --> D
+  L --> R["HTML and JSON reports"]
+  H --> D
+  H --> R
 ```
 
-## 快速开始
+### Quick start
 
-1. 复制环境变量模板
+Requirements: Docker Desktop with Docker Compose and PowerShell on Windows.
+
+1. Create your local configuration:
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-2. 启动常驻服务
+2. Replace the example passwords and tokens in `.env` before exposing the services beyond your computer.
+
+3. Build and start the core platform:
 
 ```powershell
-docker compose up -d --build portal mongo pa11y-dashboard lhci-server lhci-scheduler
+docker compose up -d --build postgres redis portal scan-worker scan-scheduler
 ```
 
-3. 打开界面
+4. Open the dashboard:
 
-- OpenAudit Hub: `http://localhost:9090`
+```text
+http://localhost:9090
+```
+
+Optional standalone tools:
+
+```powershell
+docker compose up -d --build mongo pa11y-dashboard lhci-server lhci-scheduler
+```
+
 - Pa11y Dashboard: `http://localhost:4000`
-- Lighthouse CI Server: `http://localhost:9001`
-  - Default username: `admin`
-  - Default password: `change-me`
+- Lighthouse CI: `http://localhost:9001`
 
-## 常用命令
+### Add websites and run scans
 
-### 运行 Lighthouse 巡检并上传到 LHCI
+Use the web interface instead of editing configuration files:
 
-先编辑 `config/lhci/urls.txt`，每行一个 URL。
+1. Open `http://localhost:9090/websites`.
+2. Add a website name and base URL.
+3. Set its page limit, exclusions, schedule, and enabled state.
+4. Open `http://localhost:9090/scans`.
+5. Choose a website and scan mode, then start the scan.
 
-也可以用脚本切换目标网站：
+Available modes:
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\set-target.ps1 -Url https://www.example.com/
-```
+- **Full audit:** crawl, Lighthouse, and Pa11y.
+- **Accessibility:** crawl and Pa11y.
+- **Lighthouse only:** crawl and Lighthouse.
 
-如果你第一次打开 `http://localhost:9001` 只看到欢迎页，先初始化一个 LHCI 项目：
+The worker discovers sitemap and internal pages, stores the page inventory, runs the selected tools, merges repeated findings, and reconciles issue status without mixing results from different websites.
 
-```powershell
-.\scripts\init-lhci.ps1
-```
+### Reports and operational views
 
-```powershell
-.\scripts\run-lighthouse.ps1
-```
+| View | URL |
+| --- | --- |
+| Dashboard | `http://localhost:9090/` |
+| Websites | `http://localhost:9090/websites` |
+| Scans | `http://localhost:9090/scans` |
+| Issues | `http://localhost:9090/modules/issues` |
+| Crawled pages | `http://localhost:9090/modules/pages` |
+| Broken links | `http://localhost:9090/modules/broken-links` |
+| Keyword suggestions | `http://localhost:9090/modules/keyword-suggestions` |
 
-### 自动定时 Lighthouse
+Native Lighthouse HTML and JSON files are written to `outputs/reports/`. The dashboard uses the JSON reports to show latest scores, previous scores, category trends, and regressions.
 
-`lhci-scheduler` 会按 `.env` 中的 `LHCI_SCHEDULE_INTERVAL_MINUTES` 自动运行 Lighthouse，默认每 1440 分钟一次，并在启动时立刻跑一次。
+### Keyword suggestions
 
-```powershell
-docker compose up -d --build lhci-scheduler
-```
+YAKE extracts candidate phrases from titles, metadata, headings, body content, and image alternative text. This explains what a page currently targets; it does not provide real search volume or competition data by itself.
 
-### 运行 Oobee 深度扫描
-
-```powershell
-.\scripts\run-oobee.ps1 -TargetUrl https://www.example.gov.au
-```
-
-结果会输出到 `outputs/reports/`。
-
-### 运行死链检查
-
-```powershell
-.\scripts\run-linkcheck.ps1 -TargetUrl https://www.example.gov.au
-```
-
-## 目录说明
-
-- `services/pa11y-dashboard`：Pa11y Dashboard 镜像
-- `services/lhci-server`：Lighthouse CI Server 镜像
-- `services/lhci-collector`：Lighthouse 采集与上传工具
-- `services/oobee`：Oobee 深度扫描镜像
-- `services/portal`：统一门户首页
-- `config/`：URL、排除规则与扫描配置
-- `scripts/`：Windows 友好的执行脚本
-- `outputs/reports/`：扫描导出结果
-
-## 当前版本的边界
-
-这个基础版已经覆盖 Siteimprove 最核心的“无障碍 + SEO/性能 + 死链”能力，但还没有把以下能力统一到一个单独 UI 中：
-
-- 内容拼写与风格质量
-- PDF/Office 文档内容治理面板
-- 统一权限与多租户
-- 单一报表中心
-- 业务分析看板
-
-如果你愿意，我下一步可以继续把它做成一个更像成品的平台，例如：
-
-1. 增加一个统一前台 Web 门户，把所有扫描结果汇总到一个首页
-2. 增加 `Vale + LanguageTool` 内容质量检查
-3. 增加调度器，实现每周自动跑 `Oobee` 和 `LinkChecker`
-4. 增加报告导出页，做成给客户或管理层看的审计中心
-
-## 参考项目
-
-- [Pa11y Dashboard](https://github.com/pa11y/pa11y-dashboard)
-- [Lighthouse CI](https://github.com/GoogleChrome/lighthouse-ci)
-- [Oobee / Purple A11y](https://github.com/GovTechSG/purple-a11y)
-- [LinkChecker](https://github.com/linkchecker/linkchecker)
-
-## Google Lighthouse 完整报告
-
-如果你想要 [GoogleChrome/lighthouse](https://github.com/GoogleChrome/lighthouse) 原生的完整 HTML/JSON 报告，而不是只看 Lighthouse CI 的趋势面板，可以直接运行：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\run-lighthouse-report.ps1 -Url https://www.example.com/
-```
-
-生成的 `.html` 和 `.json` 会放到 `outputs/reports/`，并显示在 OpenAudit Hub 的 Recent generated reports 区域。
-
-如果要一次跑多个页面：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\run-lighthouse-report.ps1 -Url https://www.example.com/,https://www.example.com/about
-```
-
-`run-lighthouse.ps1` 也支持同样的 `-Url` 参数，用于把分数上传到 Lighthouse CI 做历史趋势。
-
-## 一键审计一个网站
-
-如果你不想分别运行 Lighthouse 报告和 Lighthouse CI，可以用这个入口：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\run-audit.ps1 -Url https://www.example.com/
-```
-
-它会自动更新目标网址、生成 Google Lighthouse 原生 HTML/JSON 报告，并在已配置 `LHCI_BUILD_TOKEN` 时上传到 Lighthouse CI。
-
-如果还想顺便检查死链：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\run-audit.ps1 -Url https://www.example.com/ -IncludeLinks
-```
-
-## Sitemap crawler
-
-OpenAudit can now fetch XML sitemaps for every website listed in `config/lhci/urls.txt` and save JSON reports to `outputs/reports/`.
-
-Run all configured websites:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\crawl-sitemaps.ps1
-```
-
-Run one website only:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\crawl-sitemaps.ps1 -Url https://www.example.com/ -Limit 500
-```
-
-Review the result in `http://localhost:9090/modules/sitemaps`.
-
-## Batch broken-link checks
-
-Run LinkChecker for every website listed in `config/lhci/urls.txt`:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\run-linkcheck.ps1
-```
-
-Run one website only:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\run-linkcheck.ps1 -TargetUrl https://www.example.com/
-```
-
-Reports are saved to `outputs/reports/` with site-specific names such as `linkcheck-example-com-20260616-120000.txt`, and the Hub shows counts under `http://localhost:9090/modules/broken-links`.
-
-## Keyword suggestions
-
-OpenAudit Hub uses a layered keyword suggestion approach:
-
-- YAKE extracts candidate keywords from live page content: title, meta description, headings, paragraphs, and image alt text.
-- Sitemap data maps keyword ideas back to landing pages.
-- Lighthouse SEO issues are used to estimate priority, difficulty, and points you can gain.
-
-After changing portal dependencies or keyword logic, rebuild the portal image:
-
-```powershell
-docker compose up -d --build portal
-```
-
-Then open:
+To add actual search performance, export Google Search Console query data and save it using the website key:
 
 ```text
-http://localhost:9090/modules/keyword-suggestions
-```
-
-Google Search Console can be connected later to add real query data such as impressions, clicks, CTR, and average position.
-
-### Import Google Search Console CSV
-
-You can enrich Keyword suggestions before building a full OAuth connector.
-
-1. Open Google Search Console Performance.
-2. Export a CSV that includes query data. Page-level exports are better when available.
-3. Save the file with the site key in the filename:
-
-```text
-config/search-console/gsc-truvisionled-com-au.csv
+config/search-console/gsc-example-com.csv
 ```
 
 Recommended columns:
@@ -253,129 +140,230 @@ Recommended columns:
 Query, Page, Clicks, Impressions, CTR, Position
 ```
 
-Open the module again:
+### Useful scripts
 
-```text
-http://localhost:9090/modules/keyword-suggestions?site=truvisionled-com-au
+```powershell
+# Generate a native Lighthouse HTML/JSON report
+powershell -ExecutionPolicy Bypass -File .\scripts\run-lighthouse-report.ps1 -Url https://www.example.com/
+
+# Run an audit and optionally include link checking
+powershell -ExecutionPolicy Bypass -File .\scripts\run-audit.ps1 -Url https://www.example.com/ -IncludeLinks
+
+# Run an Oobee deep accessibility scan
+powershell -ExecutionPolicy Bypass -File .\scripts\run-oobee.ps1 -TargetUrl https://www.example.com/
+
+# Run LinkChecker
+powershell -ExecutionPolicy Bypass -File .\scripts\run-linkcheck.ps1 -TargetUrl https://www.example.com/
 ```
 
-The Search Console insights table will show imported queries and the keyword recommendations will use clicks, impressions, CTR, and position where a matching query is found.
+### Security and data
 
-## Audit history and trends
+- `.env`, databases, generated reports, caches, and runtime files are excluded from Git.
+- Public targets are enforced by default. Set `ALLOW_PRIVATE_TARGETS=true` only for trusted internal-site scanning.
+- Change all example credentials before deployment.
+- Put the application behind HTTPS and authentication before allowing internet access.
+- Review scanner permissions and network access in production environments.
 
-OpenAudit Hub now builds a lightweight trend layer from generated Lighthouse JSON reports.
+### Project structure
 
-Open the dashboard to see latest score, previous score, score delta, category trends, and recent crawl regressions:
+| Path | Contents |
+| --- | --- |
+| `services/portal` | Flask dashboard, APIs, templates, and migrations |
+| `services/scan-worker` | Celery crawling and scanner pipeline |
+| `services/lhci-*` | Lighthouse CI server, collector, and scheduler |
+| `services/pa11y-dashboard` | Pa11y Dashboard image |
+| `services/oobee` | Oobee deep scanner image |
+| `config` | Scanner, URL, and optional connector configuration |
+| `scripts` | PowerShell operational helpers |
+| `outputs/reports` | Generated reports; contents are not committed |
 
-```text
-http://localhost:9090/?site=truvisionled-com-au
+### Current scope
+
+OpenAudit already covers the core accessibility, SEO, performance, page inventory, broken-link, and issue-management workflow. Areas for future development include richer content-policy checks, PDF/Office auditing, enterprise authentication, multi-tenancy, live Search Console OAuth, and safe CMS-assisted remediation.
+
+---
+
+## 简体中文
+
+### OpenAudit 能做什么
+
+- 在一个管理后台中维护多个网站。
+- 自动发现 Sitemap 和同域名内部链接。
+- 使用 Lighthouse 检查性能、SEO、无障碍和最佳实践。
+- 使用 Pa11y 执行 WCAG 检查，并提供选择器、HTML 证据和可执行的修复建议。
+- 检测死链并维护完整的页面清单。
+- 管理问题的开放、已分配、处理中、已解决、忽略和重新打开状态。
+- 通过 Celery 和 Redis 在后台执行耗时扫描，避免网页请求卡死。
+- 使用 PostgreSQL 保存网站、扫描任务、页面和问题历史。
+- 使用 YAKE 提取页面关键词，并可导入 Google Search Console CSV 数据进行增强。
+- 保留 Lighthouse 原生 HTML/JSON 报告，并展示历史分数趋势。
+
+### 开源组件
+
+| 组件 | 用途 |
+| --- | --- |
+| OpenAudit Hub | 统一仪表盘、网站管理、问题、修复指导和趋势 |
+| Lighthouse / Lighthouse CI | 性能、SEO、无障碍和最佳实践审计 |
+| Pa11y / Pa11y Dashboard | WCAG 无障碍检查与持续监控 |
+| Oobee（原 Purple A11y） | 基于爬虫的深度无障碍审计 |
+| LinkChecker | 死链验证 |
+| PostgreSQL | 业务数据和历史数据存储 |
+| Redis + Celery | 后台任务和定时扫描 |
+| YAKE | 本地关键词提取 |
+| Matomo / Mautic | 可选的数据分析与营销集成 |
+
+### 架构
+
+```mermaid
+flowchart LR
+  U["内容、QA、SEO 与开发团队"] --> H["OpenAudit Hub"]
+  H --> Q["Celery 与 Redis"]
+  Q --> C["网站爬虫"]
+  Q --> L["Lighthouse"]
+  Q --> P["Pa11y"]
+  Q --> K["LinkChecker / Oobee"]
+  C --> D["PostgreSQL"]
+  L --> D
+  P --> D
+  L --> R["HTML 与 JSON 报告"]
+  H --> D
+  H --> R
 ```
 
-The dashboard also compares the latest crawl with the previous crawl and shows new issues, resolved issues, and the number of open issues in each historical snapshot. The first crawl for a website is treated as the baseline.
+### 快速开始
 
-The dashboard Activity plan exposes the highest-impact fixes with owner, priority, timing, next step, and validation guidance:
+运行环境：Docker Desktop、Docker Compose，以及 Windows PowerShell。
 
-```text
-http://localhost:9090/api/action-plan?site=truvisionled-com-au
+1. 创建本地配置：
+
+```powershell
+Copy-Item .env.example .env
 ```
 
-Structured history is also available from:
+2. 如果服务需要被其他电脑访问，请先修改 `.env` 中的示例密码和令牌。
 
-```text
-http://localhost:9090/api/history?site=truvisionled-com-au
-```
-
-Export trend data:
-
-```text
-http://localhost:9090/api/history/export.csv?site=truvisionled-com-au
-```
-
-Run Lighthouse repeatedly for the same website to populate meaningful trend comparisons.
-
-## Website database and background scans
-
-OpenAudit now uses PostgreSQL as the primary source for managed websites, scan jobs, and issue lifecycle records. Redis and Celery run Lighthouse outside the Flask request so the dashboard does not block during long audits.
-
-On first startup, existing URLs from `config/lhci/urls.txt` are imported into the `websites` table. After migration, manage the active list from:
-
-```text
-http://localhost:9090/websites
-```
-
-Start or monitor scans from:
-
-```text
-http://localhost:9090/scans
-```
-
-Build and start the new services:
+3. 构建并启动核心平台：
 
 ```powershell
 docker compose up -d --build postgres redis portal scan-worker scan-scheduler
 ```
 
-The scan worker writes Lighthouse HTML/JSON files into `outputs/reports`, updates progress in PostgreSQL, and reconciles issue state for the selected website.
-
-Core management APIs:
+4. 打开管理后台：
 
 ```text
-GET/POST    /api/websites
-GET/PATCH/DELETE /api/websites/{website-key}
-GET/POST    /api/scans
-GET         /api/scans/{job-id}
-GET         /api/lifecycle/issues?site={website-key}
-PATCH       /api/lifecycle/issues/{issue-id}
+http://localhost:9090
 ```
 
-Issue lifecycle states are `open`, `assigned`, `in_progress`, `resolved`, `ignored`, and `reopened`. Re-scanning automatically resolves findings that disappear and reopens resolved findings that return, while preserving manually assigned, in-progress, and ignored records.
-
-### Database migrations
-
-The Portal runs `alembic upgrade head` before Flask starts. Migration files live in `services/portal/migrations/versions` and must be committed whenever the operational schema changes.
-
-To inspect the current migration inside the container:
+如需启动独立的 Pa11y Dashboard 和 Lighthouse CI：
 
 ```powershell
-docker compose exec portal alembic -c /app/alembic.ini current
+docker compose up -d --build mongo pa11y-dashboard lhci-server lhci-scheduler
 ```
 
-### Unified scan pipeline
+- Pa11y Dashboard：`http://localhost:4000`
+- Lighthouse CI：`http://localhost:9001`
 
-Each background scan now performs these stages:
+### 添加网站并运行扫描
 
-1. Discover `/sitemap.xml` and same-domain internal links.
-2. Apply the website maximum-page and excluded-path settings.
-3. Save URL, title, HTTP status, crawl depth, source, content type, and errors in `crawl_pages`.
-4. Run Lighthouse on representative pages, beginning with the homepage and shallow pages.
-5. Run Pa11y WCAG checks across the configured accessibility page limit.
-6. Merge repeated findings across pages and save URL, selector, HTML snippet, and explanation evidence.
-7. Reconcile open, resolved, ignored, and reopened issue lifecycle records independently for each scanner.
+日常使用不需要手动修改配置文件：
 
-Useful worker settings:
+1. 打开 `http://localhost:9090/websites`。
+2. 添加网站名称和网站根地址。
+3. 设置最大页面数、排除路径、扫描周期和启用状态。
+4. 打开 `http://localhost:9090/scans`。
+5. 选择网站和扫描模式，然后开始扫描。
+
+扫描模式：
+
+- **完整审计：** 爬取页面、运行 Lighthouse 和 Pa11y。
+- **无障碍审计：** 爬取页面并运行 Pa11y。
+- **仅 Lighthouse：** 爬取页面并运行 Lighthouse。
+
+后台任务会发现网站页面、保存页面清单、运行对应工具、合并重复问题，并分别维护每个网站的问题状态，不会把不同网站的结果混在一起。
+
+### 报告和管理页面
+
+| 页面 | 地址 |
+| --- | --- |
+| 仪表盘 | `http://localhost:9090/` |
+| 网站管理 | `http://localhost:9090/websites` |
+| 扫描任务 | `http://localhost:9090/scans` |
+| 问题中心 | `http://localhost:9090/modules/issues` |
+| 页面清单 | `http://localhost:9090/modules/pages` |
+| 死链检查 | `http://localhost:9090/modules/broken-links` |
+| 关键词建议 | `http://localhost:9090/modules/keyword-suggestions` |
+
+Lighthouse 原生 HTML 和 JSON 报告保存在 `outputs/reports/`。仪表盘会读取 JSON 报告，展示最新分数、上次分数、分类趋势和退步项目。
+
+### 关键词建议
+
+YAKE 会从标题、Meta 信息、页面标题、正文和图片替代文字中提取候选关键词。它能够分析页面当前在讲什么，但本身不提供真实搜索量或关键词竞争难度。
+
+如需加入真实搜索表现，可从 Google Search Console 导出查询数据，并按照网站 Key 保存：
 
 ```text
-LIGHTHOUSE_PAGE_LIMIT=3
-CRAWL_MAX_DEPTH=3
-SCHEDULE_CHECK_SECONDS=300
-PA11Y_PAGE_LIMIT=20
-PA11Y_STANDARD=WCAG2AA
-PA11Y_TIMEOUT_MS=60000
+config/search-console/gsc-example-com.csv
 ```
 
-Scan modes available at `http://localhost:9090/scans`:
-
-- `Full audit`: page discovery, Lighthouse, and Pa11y.
-- `Accessibility (Pa11y)`: page discovery and Pa11y only.
-- `Lighthouse only`: page discovery and Lighthouse only.
-
-Pa11y findings appear directly in the OpenAudit Issues page with their affected URL, selector, HTML context, status, and owner. The separate Pa11y Dashboard remains optional rather than being required to start scans.
-
-The `scan-scheduler` Celery Beat service checks Daily, Weekly, and Monthly website schedules. It will not queue another scan while the website already has a queued or running job.
-
-Full crawl inventory is available from:
+建议包含以下字段：
 
 ```text
-http://localhost:9090/modules/pages?site=truvisionled-com-au
-http://localhost:9090/api/crawl-pages?site=truvisionled-com-au
+Query, Page, Clicks, Impressions, CTR, Position
 ```
+
+### 常用脚本
+
+```powershell
+# 生成 Lighthouse 原生 HTML/JSON 报告
+powershell -ExecutionPolicy Bypass -File .\scripts\run-lighthouse-report.ps1 -Url https://www.example.com/
+
+# 运行综合审计，并同时检查死链
+powershell -ExecutionPolicy Bypass -File .\scripts\run-audit.ps1 -Url https://www.example.com/ -IncludeLinks
+
+# 运行 Oobee 深度无障碍扫描
+powershell -ExecutionPolicy Bypass -File .\scripts\run-oobee.ps1 -TargetUrl https://www.example.com/
+
+# 运行 LinkChecker
+powershell -ExecutionPolicy Bypass -File .\scripts\run-linkcheck.ps1 -TargetUrl https://www.example.com/
+```
+
+### 安全与数据
+
+- `.env`、数据库、扫描报告、缓存和运行时文件不会上传到 Git。
+- 默认只允许扫描公网目标；仅在可信内部环境中设置 `ALLOW_PRIVATE_TARGETS=true`。
+- 正式部署前必须修改所有示例账号和密码。
+- 如果允许互联网访问，请在应用前配置 HTTPS 和身份认证。
+- 生产环境中应限制扫描容器的权限和网络访问范围。
+
+### 项目目录
+
+| 路径 | 内容 |
+| --- | --- |
+| `services/portal` | Flask 管理后台、API、模板和数据库迁移 |
+| `services/scan-worker` | Celery 爬虫与扫描流水线 |
+| `services/lhci-*` | Lighthouse CI 服务、采集器和调度器 |
+| `services/pa11y-dashboard` | Pa11y Dashboard 镜像 |
+| `services/oobee` | Oobee 深度扫描镜像 |
+| `config` | 扫描器、URL 和可选连接器配置 |
+| `scripts` | PowerShell 运维脚本 |
+| `outputs/reports` | 生成的报告，内容不会提交到仓库 |
+
+### 当前范围
+
+OpenAudit 已经覆盖无障碍、SEO、性能、页面清单、死链和问题管理的核心工作流。后续还可以继续增加内容规范检查、PDF/Office 文档审计、企业身份认证、多租户、Search Console OAuth，以及安全的 CMS 辅助修复功能。
+
+---
+
+## Related projects / 相关项目
+
+- [Lighthouse](https://github.com/GoogleChrome/lighthouse)
+- [Lighthouse CI](https://github.com/GoogleChrome/lighthouse-ci)
+- [Pa11y](https://github.com/pa11y/pa11y)
+- [Pa11y Dashboard](https://github.com/pa11y/pa11y-dashboard)
+- [Oobee](https://github.com/GovTechSG/purple-a11y)
+- [LinkChecker](https://github.com/linkchecker/linkchecker)
+- [YAKE](https://github.com/LIAAD/yake)
+
+## License / 许可证
+
+[MIT](LICENSE)
