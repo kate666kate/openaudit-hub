@@ -1,0 +1,306 @@
+services:
+  portal:
+    build:
+      context: ./services/portal
+    container_name: openaudit-portal
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      PORT: 8080
+      PORTAL_TITLE: OpenAudit Hub
+      PORTAL_SUBTITLE: Open-source website quality operations center
+      PA11Y_URL: http://localhost:${PA11Y_PORT:-4000}
+      LHCI_URL: http://localhost:${LHCI_PORT:-9001}
+      MATOMO_URL: http://localhost:${MATOMO_PORT:-8088}
+      MATOMO_API_URL: http://matomo
+      MATOMO_SITE_ID: ${MATOMO_SITE_ID:-1}
+      MATOMO_TOKEN_AUTH: ${MATOMO_TOKEN_AUTH:-}
+      MAUTIC_URL: http://localhost:${MAUTIC_PORT:-8089}
+      DRUPAL_BASE_URL: ${DRUPAL_BASE_URL:-}
+      DRUPAL_JSONAPI_PATH: ${DRUPAL_JSONAPI_PATH:-/jsonapi}
+      LHCI_API_URL: http://lhci-server:9001
+      LHCI_BASIC_AUTH_USERNAME: ${LHCI_BASIC_AUTH_USERNAME:-admin}
+      LHCI_BASIC_AUTH_PASSWORD: ${LHCI_BASIC_AUTH_PASSWORD:-change-me}
+      DEFAULT_TARGET_URL: ${DEFAULT_TARGET_URL:-https://example.gov.au}
+      ALLOW_PRIVATE_TARGETS: ${ALLOW_PRIVATE_TARGETS:-false}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-openaudit}:${POSTGRES_PASSWORD:-openaudit}@postgres:5432/${POSTGRES_DB:-openaudit}
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+    ports:
+      - "${PORTAL_PORT:-9090}:8080"
+    volumes:
+      - ./outputs/reports:/app/reports
+      - ./config/lhci:/app/config/lhci:ro
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: openaudit-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-openaudit}
+      POSTGRES_USER: ${POSTGRES_USER:-openaudit}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-openaudit}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-openaudit} -d ${POSTGRES_DB:-openaudit}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: openaudit-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    volumes:
+      - redis-data:/data
+
+  scan-worker:
+    build:
+      context: .
+      dockerfile: services/scan-worker/Dockerfile
+    container_name: openaudit-scan-worker
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-openaudit}:${POSTGRES_PASSWORD:-openaudit}@postgres:5432/${POSTGRES_DB:-openaudit}
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      REPORTS_DIR: /reports
+      LIGHTHOUSE_SETTINGS_PRESET: ${LIGHTHOUSE_SETTINGS_PRESET:-desktop}
+      LIGHTHOUSE_PAGE_LIMIT: ${LIGHTHOUSE_PAGE_LIMIT:-3}
+      PA11Y_PAGE_LIMIT: ${PA11Y_PAGE_LIMIT:-20}
+      PA11Y_STANDARD: ${PA11Y_STANDARD:-WCAG2AA}
+      PA11Y_TIMEOUT_MS: ${PA11Y_TIMEOUT_MS:-60000}
+      CRAWL_MAX_DEPTH: ${CRAWL_MAX_DEPTH:-3}
+      ALLOW_PRIVATE_TARGETS: ${ALLOW_PRIVATE_TARGETS:-false}
+      CHROME_PATH: /usr/bin/chromium
+    volumes:
+      - ./outputs/reports:/reports
+
+  scan-scheduler:
+    build:
+      context: .
+      dockerfile: services/scan-worker/Dockerfile
+    container_name: openaudit-scan-scheduler
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-openaudit}:${POSTGRES_PASSWORD:-openaudit}@postgres:5432/${POSTGRES_DB:-openaudit}
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      SCHEDULE_CHECK_SECONDS: ${SCHEDULE_CHECK_SECONDS:-300}
+    command: ["dumb-init", "celery", "-A", "tasks.celery_app", "beat", "--loglevel=INFO"]
+
+  mongo:
+    image: mongo:7
+    container_name: openaudit-mongo
+    restart: unless-stopped
+    ports:
+      - "${MONGO_PORT:-27017}:27017"
+    volumes:
+      - mongo-data:/data/db
+
+  matomo-db:
+    image: mariadb:11
+    container_name: openaudit-matomo-db
+    restart: unless-stopped
+    command: --max-allowed-packet=64MB
+    environment:
+      MARIADB_DATABASE: ${MATOMO_DATABASE:-matomo}
+      MARIADB_USER: ${MATOMO_DATABASE_USER:-matomo}
+      MARIADB_PASSWORD: ${MATOMO_DATABASE_PASSWORD:-matomo}
+      MARIADB_ROOT_PASSWORD: ${MATOMO_DATABASE_ROOT_PASSWORD:-matomo-root}
+    volumes:
+      - matomo-db-data:/var/lib/mysql
+
+  matomo:
+    image: matomo:5-apache
+    container_name: openaudit-matomo
+    restart: unless-stopped
+    depends_on:
+      - matomo-db
+    environment:
+      MATOMO_DATABASE_HOST: matomo-db
+      MATOMO_DATABASE_ADAPTER: mysql
+      MATOMO_DATABASE_TABLES_PREFIX: matomo_
+      MATOMO_DATABASE_DBNAME: ${MATOMO_DATABASE:-matomo}
+      MATOMO_DATABASE_USERNAME: ${MATOMO_DATABASE_USER:-matomo}
+      MATOMO_DATABASE_PASSWORD: ${MATOMO_DATABASE_PASSWORD:-matomo}
+    ports:
+      - "${MATOMO_PORT:-8088}:80"
+    volumes:
+      - matomo-data:/var/www/html
+
+  mautic-db:
+    image: mariadb:11
+    container_name: openaudit-mautic-db
+    profiles: ["marketing"]
+    restart: unless-stopped
+    command: --max-allowed-packet=64MB
+    environment:
+      MARIADB_DATABASE: ${MAUTIC_DB_NAME:-mautic}
+      MARIADB_USER: ${MAUTIC_DB_USER:-mautic}
+      MARIADB_PASSWORD: ${MAUTIC_DB_PASSWORD:-mautic}
+      MARIADB_ROOT_PASSWORD: ${MAUTIC_DB_ROOT_PASSWORD:-mautic-root}
+    volumes:
+      - mautic-db-data:/var/lib/mysql
+
+  mautic:
+    image: mautic/mautic:5-apache
+    container_name: openaudit-mautic
+    profiles: ["marketing"]
+    restart: unless-stopped
+    depends_on:
+      - mautic-db
+    environment:
+      MAUTIC_DB_HOST: mautic-db
+      MAUTIC_DB_NAME: ${MAUTIC_DB_NAME:-mautic}
+      MAUTIC_DB_USER: ${MAUTIC_DB_USER:-mautic}
+      MAUTIC_DB_PASSWORD: ${MAUTIC_DB_PASSWORD:-mautic}
+      MAUTIC_RUN_CRON_JOBS: ${MAUTIC_RUN_CRON_JOBS:-true}
+    ports:
+      - "${MAUTIC_PORT:-8089}:80"
+    volumes:
+      - mautic-data:/var/www/html
+
+  pa11y-dashboard:
+    build:
+      context: ./services/pa11y-dashboard
+      args:
+        PA11Y_DASHBOARD_REF: ${PA11Y_DASHBOARD_REF:-main}
+    container_name: openaudit-pa11y
+    restart: unless-stopped
+    depends_on:
+      - mongo
+    environment:
+      PORT: 4000
+      NOINDEX: "true"
+      READONLY: ${PA11Y_READONLY:-false}
+      SITE_MESSAGE: ${PA11Y_SITE_MESSAGE:-OpenAudit accessibility monitoring}
+      WEBSERVICE_DATABASE: mongodb://mongo:27017/pa11y
+      WEBSERVICE_HOST: 0.0.0.0
+      WEBSERVICE_PORT: 3000
+      WEBSERVICE_CRON: ${PA11Y_CRON:-0 30 0 * * *}
+      CHROMIUM_FLAGS: --no-sandbox,--disable-setuid-sandbox
+    ports:
+      - "${PA11Y_PORT:-4000}:4000"
+
+  lhci-server:
+    build:
+      context: ./services/lhci-server
+    container_name: openaudit-lhci
+    restart: unless-stopped
+    environment:
+      PORT: 9001
+      LHCI_STORAGE__SQL_DIALECT: sqlite
+      LHCI_STORAGE__SQL_DATABASE_PATH: /data/lhci.db
+      LHCI_BASIC_AUTH__USERNAME: ${LHCI_BASIC_AUTH_USERNAME:-admin}
+      LHCI_BASIC_AUTH__PASSWORD: ${LHCI_BASIC_AUTH_PASSWORD:-change-me}
+    ports:
+      - "${LHCI_PORT:-9001}:9001"
+    volumes:
+      - lhci-data:/data
+
+  lhci-collector:
+    build:
+      context: ./services/lhci-collector
+    profiles: ["tools"]
+    depends_on:
+      - lhci-server
+    environment:
+      LHCI_SERVER_BASE_URL: http://host.docker.internal:${LHCI_PORT:-9001}
+      LHCI_BUILD_TOKEN: ${LHCI_BUILD_TOKEN:-replace-with-project-build-token}
+      LHCI_BASIC_AUTH_USERNAME: ${LHCI_BASIC_AUTH_USERNAME:-admin}
+      LHCI_BASIC_AUTH_PASSWORD: ${LHCI_BASIC_AUTH_PASSWORD:-change-me}
+      LHCI_NUMBER_OF_RUNS: ${LHCI_NUMBER_OF_RUNS:-3}
+      LHCI_SETTINGS_PRESET: ${LHCI_SETTINGS_PRESET:-desktop}
+      LHCI_BUILD_CONTEXT__CURRENT_HASH: ${LHCI_BUILD_CONTEXT__CURRENT_HASH:-0000000000000000000000000000000000000000}
+      LHCI_BUILD_CONTEXT__CURRENT_BRANCH: ${LHCI_BUILD_CONTEXT__CURRENT_BRANCH:-main}
+      LHCI_BUILD_CONTEXT__COMMIT_MESSAGE: ${LHCI_BUILD_CONTEXT__COMMIT_MESSAGE:-OpenAudit manual Lighthouse run}
+      LHCI_BUILD_CONTEXT__COMMIT_TIME: ${LHCI_BUILD_CONTEXT__COMMIT_TIME:-2026-06-11T09:00:00.000Z}
+      LHCI_BUILD_CONTEXT__AUTHOR: ${LHCI_BUILD_CONTEXT__AUTHOR:-OpenAudit <openaudit@local>}
+      LHCI_BUILD_CONTEXT__AVATAR_URL: ${LHCI_BUILD_CONTEXT__AVATAR_URL:-https://www.gravatar.com/avatar/00000000000000000000000000000000.jpg?d=identicon}
+      CHROME_PATH: /usr/bin/chromium
+    volumes:
+      - ./config/lhci:/config:ro
+
+  lhci-scheduler:
+    build:
+      context: ./services/lhci-collector
+    container_name: openaudit-lhci-scheduler
+    restart: unless-stopped
+    depends_on:
+      - lhci-server
+    environment:
+      LHCI_SERVER_BASE_URL: http://lhci-server:9001
+      LHCI_BUILD_TOKEN: ${LHCI_BUILD_TOKEN:-replace-with-project-build-token}
+      LHCI_BASIC_AUTH_USERNAME: ${LHCI_BASIC_AUTH_USERNAME:-admin}
+      LHCI_BASIC_AUTH_PASSWORD: ${LHCI_BASIC_AUTH_PASSWORD:-change-me}
+      LHCI_NUMBER_OF_RUNS: ${LHCI_NUMBER_OF_RUNS:-3}
+      LHCI_SETTINGS_PRESET: ${LHCI_SETTINGS_PRESET:-desktop}
+      LHCI_SCHEDULE_INTERVAL_MINUTES: ${LHCI_SCHEDULE_INTERVAL_MINUTES:-1440}
+      LHCI_SCHEDULE_RUN_ON_START: ${LHCI_SCHEDULE_RUN_ON_START:-true}
+      LHCI_BUILD_CONTEXT__CURRENT_BRANCH: ${LHCI_BUILD_CONTEXT__CURRENT_BRANCH:-main}
+      LHCI_BUILD_CONTEXT__COMMIT_MESSAGE: ${LHCI_BUILD_CONTEXT__COMMIT_MESSAGE:-OpenAudit scheduled Lighthouse run}
+      LHCI_BUILD_CONTEXT__AUTHOR: ${LHCI_BUILD_CONTEXT__AUTHOR:-OpenAudit <openaudit@local>}
+      LHCI_BUILD_CONTEXT__AVATAR_URL: ${LHCI_BUILD_CONTEXT__AVATAR_URL:-https://www.gravatar.com/avatar/00000000000000000000000000000000.jpg?d=identicon}
+      CHROME_PATH: /usr/bin/chromium
+    command: ["dumb-init", "node", "scheduler.js"]
+    volumes:
+      - ./config/lhci:/config:ro
+
+  lighthouse-report:
+    build:
+      context: ./services/lighthouse-report
+    profiles: ["tools"]
+    environment:
+      CHROME_PATH: /usr/bin/chromium
+      LIGHTHOUSE_SETTINGS_PRESET: ${LIGHTHOUSE_SETTINGS_PRESET:-desktop}
+    volumes:
+      - ./config/lhci:/config:ro
+      - ./outputs/reports:/reports
+
+  oobee:
+    build:
+      context: ./services/oobee
+      args:
+        OOBEE_REF: ${OOBEE_REF:-master}
+    profiles: ["tools"]
+    volumes:
+      - ./config/oobee/exclusions.txt:/app/exclusions.txt
+      - ./outputs/reports:/reports
+
+  linkchecker:
+    image: ghcr.io/linkchecker/linkchecker:latest
+    profiles: ["tools"]
+    volumes:
+      - ./outputs/reports:/reports
+
+volumes:
+  postgres-data:
+  redis-data:
+  mongo-data:
+  lhci-data:
+  matomo-data:
+  matomo-db-data:
+  mautic-data:
+  mautic-db-data:

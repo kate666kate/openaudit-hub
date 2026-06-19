@@ -1,0 +1,8 @@
+{
+  "name": "openaudit-lhci-collector",
+  "private": true,
+  "version": "1.0.0",
+  "dependencies": {
+    "@lhci/cli": "^0.15.1"
+  }
+}

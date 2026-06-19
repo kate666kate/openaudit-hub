@@ -1,0 +1,44 @@
+{% if lighthouse.issues_to_fix %}
+<div class="si-issue-table">
+  <div class="si-issue-row si-issue-head">
+    <span>Issue</span>
+    <span>Occurrences</span>
+    <span>Difficulty</span>
+    <span>Category</span>
+    <span>Status / owner</span>
+    <span>Points you can gain</span>
+  </div>
+  {% for issue in lighthouse.issues_to_fix %}
+  <div class="si-issue-row">
+    <span>
+      <strong><a href="{{ issue.href }}">{{ issue.title }}</a></strong>
+      <small>{{ issue.recommendation }}</small>
+    </span>
+    <span>{{ issue.occurrences }}</span>
+    <span>
+      <em class="difficulty-dots dots-{{ issue.difficulty_dots }}">
+        <i></i><i></i><i></i><i></i>
+      </em>
+    </span>
+    <span>{{ issue.category }}</span>
+    <span>
+      {% if issue.lifecycle_id %}
+      <form class="si-lifecycle-form" method="post" action="/issues/lifecycle/{{ issue.lifecycle_id }}">
+        <input type="hidden" name="site" value="{{ selected_site_key }}">
+        <select name="status" aria-label="Issue status">
+          {% for status in ['open', 'assigned', 'in_progress', 'resolved', 'ignored'] %}
+          <option value="{{ status }}" {% if issue.lifecycle_status == status %}selected{% endif %}>{{ status|replace('_', ' ')|title }}</option>
+          {% endfor %}
+        </select>
+        <input name="owner" value="{{ issue.lifecycle_owner }}" aria-label="Issue owner">
+        <button type="submit">Save</button>
+      </form>
+      {% else %}<span class="si-job-status">Open</span>{% endif %}
+    </span>
+    <span>{{ issue.points }} points</span>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<p class="si-empty">No weighted issues found in the latest crawl.</p>
+{% endif %}

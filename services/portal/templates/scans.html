@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="refresh" content="15">
+    <title>Scans | {{ title }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  </head>
+  <body class="si-page">
+    <header class="si-topbar"><strong>OpenAudit</strong><nav><a href="/">Dashboard</a><a href="/api/scans">API</a></nav></header>
+    <div class="si-layout">
+      {% include "partials/si_drawer.html" %}
+      <main class="si-main">
+        <div class="si-heading"><div><p class="label">Operations</p><h1>Scans</h1><p>Queue audits and follow their progress without blocking the dashboard.</p></div></div>
+        {% if queue_error %}<div class="si-form-message error"><strong>Scan was not queued</strong><span>{{ queue_error }}</span></div>{% endif %}
+        <section class="si-wide-card si-scan-launch">
+          <div class="si-card-head"><div><h2>Run a scan</h2><span>Page discovery and Lighthouse execute in the background worker</span></div></div>
+          <form method="post" action="/scans" class="si-scan-form">
+            <label><span>Website</span><select name="website_key" required>{% for website in websites %}<option value="{{ website.key }}">{{ website.name }}</option>{% endfor %}</select></label>
+            <label><span>Scan type</span><select name="scan_type"><option value="full">Full audit</option><option value="accessibility">Accessibility (Pa11y)</option><option value="lighthouse">Lighthouse only</option></select></label>
+            <button type="submit">Start scan</button>
+          </form>
+        </section>
+        <section class="si-wide-card">
+          <div class="si-card-head"><div><h2>Scan activity</h2><span>Refreshes every 15 seconds</span></div></div>
+          <div class="si-scan-list">
+            <div class="si-scan-row si-scan-head"><span>Website</span><span>Type</span><span>Status</span><span>Progress</span><span>Started</span><span>Result</span></div>
+            {% for job in jobs %}
+            <article class="si-scan-row {% if selected_job == job.id %}selected{% endif %}">
+              <strong>{{ job.website_key }}</strong>
+              <span>{{ job.scan_type|title }}</span>
+              <span class="si-job-status si-job-{{ job.status }}">{{ job.status|replace('_', ' ')|title }}</span>
+              <div class="si-job-progress"><i><b style="width: {{ job.progress }}%"></b></i><span>{{ job.progress }}%</span></div>
+              <span>{{ job.started_at or job.created_at }}</span>
+              <div><strong>{{ job.message or 'Waiting for update.' }}</strong>{% if job.report_path %}<small>{{ job.report_path }}</small>{% endif %}</div>
+            </article>
+            {% else %}<p class="si-empty">No scan jobs yet.</p>{% endfor %}
+          </div>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

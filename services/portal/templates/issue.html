@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ issue.title }} | {{ title }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div>
+          <div class="brand-row">
+            <div class="brand-mark">OA</div>
+            <strong>OpenAudit</strong>
+          </div>
+          <a class="back-link" href="/{% if selected_site_key %}?site={{ selected_site_key }}{% endif %}">Back to overview</a>
+          <h1>Issue details</h1>
+          <p>Review impact, affected elements, and remediation guidance.</p>
+        </div>
+        <nav class="nav-stack issue-step-nav" aria-label="Issue navigation">
+          <span>Fix workflow</span>
+          <a class="active" href="#summary">
+            <b>1</b>
+            <span>
+              <strong>Overview</strong>
+              <small>Score impact and owner</small>
+            </span>
+          </a>
+          <a href="#examples">
+            <b>2</b>
+            <span>
+              <strong>Evidence</strong>
+              <small>Selectors and affected code</small>
+            </span>
+          </a>
+          <a href="#remediation">
+            <b>3</b>
+            <span>
+              <strong>How to fix</strong>
+              <small>Steps and acceptance criteria</small>
+            </span>
+          </a>
+          <a href="#activity-plan">
+            <b>4</b>
+            <span>
+              <strong>Verify and close</strong>
+              <small>Re-scan and confirm improvement</small>
+            </span>
+          </a>
+          <span>Open tools</span>
+          <a href="{{ lighthouse.report_href }}" target="_blank" rel="noreferrer">Full Lighthouse report</a>
+          <a href="{{ pa11y_url }}" target="_blank" rel="noreferrer">Pa11y Dashboard</a>
+          <a href="{{ lhci_url }}" target="_blank" rel="noreferrer">Lighthouse CI</a>
+        </nav>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div>
+            <p class="label">Issue detail</p>
+            <h2>{{ issue.title }}</h2>
+            {% if selected_site_url %}
+            <p class="issue-site-context">Current website: <strong>{{ selected_site_label }}</strong> <span>{{ selected_site_url }}</span></p>
+            {% endif %}
+          </div>
+          <div class="issue-top-actions">
+            <form class="issue-site-switcher" method="get" action="/issues/{{ issue.id }}">
+              <label for="issue-site">Website</label>
+              <select id="issue-site" name="site" onchange="this.form.submit()">
+                {% for site in site_options %}
+                <option value="{{ site.key }}" {% if site.key == selected_site_key %}selected{% endif %}>{{ site.label }}</option>
+                {% endfor %}
+              </select>
+            </form>
+            <a class="link-button" href="/{% if selected_site_key %}?site={{ selected_site_key }}{% endif %}">Back to overview</a>
+          </div>
+        </header>
+
+        <section class="issue-detail-hero" id="summary">
+          <div>
+            <p class="label">{{ issue.category }}</p>
+            <h3>{{ issue.title }}</h3>
+            <p>{{ issue.recommendation }}</p>
+            <div class="issue-next-action">
+              <span>Start here</span>
+              <strong>{{ issue.fix_guidance.steps[0] }}</strong>
+              <p>{{ issue.fix_guidance.handoff_note }}</p>
+            </div>
+          </div>
+          <div class="issue-detail-score">
+            <span>Points you can gain</span>
+            <strong>{{ issue.points }}</strong>
+            <small>{{ issue.fix_guidance.priority }} priority</small>
+          </div>
+        </section>
+
+        {% if lighthouse.report_source %}
+        <section class="report-source-card" aria-label="Report source">
+          <div>
+            <span>Report source</span>
+            <strong>{{ lighthouse.report_source.site }}</strong>
+            <p>{{ lighthouse.report_source.url }}</p>
+          </div>
+          <div>
+            <span>Generated</span>
+            <strong>{{ lighthouse.report_source.generated_at or "Not available" }}</strong>
+            <p>{{ lighthouse.report_source.json }}</p>
+          </div>
+          {% if lighthouse.report_href %}
+          <a class="link-button" href="{{ lighthouse.report_href }}" target="_blank" rel="noreferrer">Open HTML report</a>
+          {% endif %}
+        </section>
+        {% endif %}
+
+        <div class="issue-section-label">
+          <span>Issue facts</span>
+          <p>Use this row to decide who owns the fix and how much score can be recovered.</p>
+        </div>
+        <section class="detail-grid" aria-label="Issue facts">
+          <article>
+            <span>Conformance</span>
+            <strong><em class="conf conf-{{ issue.conformance|lower }}">{{ issue.conformance }}</em></strong>
+          </article>
+          <article>
+            <span>Difficulty</span>
+            <strong>{{ issue.difficulty }}</strong>
+          </article>
+          <article>
+            <span>Responsibility</span>
+            <strong>{{ issue.responsibility }}</strong>
+          </article>
+          <article>
+            <span>Element</span>
+            <strong>{{ issue.element }}</strong>
+          </article>
+          <article>
+            <span>Occurrences</span>
+            <strong>{{ issue.occurrences }}</strong>
+          </article>
+          <article>
+            <span>Affected pages</span>
+            <strong>{{ issue.pages }}</strong>
+          </article>
+        </section>
+
+        <section class="panel" id="examples">
+          <div class="panel-head">
+            <div>
+              <p class="label">Affected examples</p>
+              <h3>Where this appears</h3>
+            </div>
+            <a class="link-button" href="{{ lighthouse.report_href }}" target="_blank" rel="noreferrer">Open full audit</a>
+          </div>
+          {% if issue.affected_examples %}
+          <div class="affected-list detail">
+            {% for example in issue.affected_examples %}
+            <article>
+              {% if example.page_url %}<a class="evidence-page-url" href="{{ example.page_url }}" target="_blank" rel="noreferrer">{{ example.page_url }}</a>{% endif %}
+              <span>{{ example.selector }}</span>
+              {% if example.snippet %}<code>{{ example.snippet }}</code>{% endif %}
+              {% if example.explanation %}<p>{{ example.explanation }}</p>{% endif %}
+            </article>
+            {% endfor %}
+          </div>
+          {% else %}
+          <div class="empty evidence-empty">
+            <strong>No page element was attached to this audit.</strong>
+            <p>For performance or SEO audits, Lighthouse often reports the metric without a DOM selector. Use the full audit to inspect the timing, request, or metadata evidence.</p>
+            <a class="link-button" href="{{ lighthouse.report_href }}" target="_blank" rel="noreferrer">Review raw evidence</a>
+          </div>
+          {% endif %}
+        </section>
+
+        <section class="panel" id="remediation">
+          <div class="panel-head">
+            <div>
+              <p class="label">Fix guidance</p>
+              <h3>What should I change?</h3>
+            </div>
+          </div>
+          <div class="fix-task-card">
+            <div class="fix-task-main">
+              <p class="label">Recommended task</p>
+              <h4>{{ issue.fix_guidance.what_to_change[0] }}</h4>
+              <p>{{ issue.fix_guidance.why_it_matters }}</p>
+            </div>
+            <div class="fix-task-meta">
+              <span>Owner</span>
+              <strong>{{ issue.fix_guidance.owner }}</strong>
+              <span>Priority</span>
+              <strong>{{ issue.fix_guidance.priority }}</strong>
+            </div>
+          </div>
+
+          <div class="fix-flow">
+            <article>
+              <b>1</b>
+              <div>
+                <span>Open</span>
+                <strong>{{ issue.fix_guidance.where_to_change[0].place }}</strong>
+                <p>{{ issue.fix_guidance.where_to_change[0].detail }}</p>
+              </div>
+            </article>
+            <article>
+              <b>2</b>
+              <div>
+                <span>Change</span>
+                <strong>{{ issue.fix_guidance.what_to_change[0] }}</strong>
+                {% if issue.fix_guidance.what_to_change|length > 1 %}
+                <p>{{ issue.fix_guidance.what_to_change[1] }}</p>
+                {% endif %}
+              </div>
+            </article>
+            <article>
+              <b>3</b>
+              <div>
+                <span>Verify</span>
+                <strong>Run a new scan</strong>
+                <p>{{ issue.fix_guidance.success_signal }}</p>
+              </div>
+            </article>
+          </div>
+
+          <details class="fix-more-detail">
+            <summary>More detail: steps, checks, and acceptance criteria</summary>
+            <div class="guidance-grid">
+              <article class="guidance-panel do-panel">
+                <p class="label">Recommended steps</p>
+                <h4>Do this first</h4>
+                <ol class="guidance-list">
+                  {% for step in issue.fix_guidance.steps %}
+                  <li>{{ step }}</li>
+                  {% endfor %}
+                </ol>
+              </article>
+              <article class="guidance-panel check-panel">
+                <p class="label">Validation checks</p>
+                <h4>Confirm it worked</h4>
+                <ul class="guidance-list">
+                  {% for check in issue.fix_guidance.validation %}
+                  <li>{{ check }}</li>
+                  {% endfor %}
+                </ul>
+              </article>
+            </div>
+
+            <div class="guidance-grid compact">
+              <article>
+                <p class="label">Acceptance criteria</p>
+                <ul class="guidance-list">
+                  {% for item in issue.fix_guidance.acceptance_criteria %}
+                  <li>{{ item }}</li>
+                  {% endfor %}
+                </ul>
+              </article>
+              <article>
+                <p class="label">Implementation hint</p>
+                <p class="guidance-note">{{ issue.fix_guidance.code_hint }}</p>
+                <code class="guidance-code">{{ issue.id }}</code>
+              </article>
+            </div>
+          </details>
+        </section>
+
+        <section class="panel" id="activity-plan">
+          <div class="panel-head">
+            <div>
+              <p class="label">Activity plan</p>
+              <h3>Suggested work item</h3>
+            </div>
+          </div>
+          <div class="activity-plan">
+            <article>
+              <span>Task</span>
+              <strong>Fix {{ issue.title }}</strong>
+              <p>{{ issue.fix_guidance.handoff_note }}</p>
+            </article>
+            <article>
+              <span>Assignment</span>
+              <strong>{{ issue.fix_guidance.owner }} &middot; {{ issue.fix_guidance.priority }}</strong>
+              <p>Target timing: {% if issue.points|float >= 10 %}this week{% elif issue.points|float >= 3 %}next sprint{% else %}backlog{% endif %}.</p>
+            </article>
+            <article>
+              <span>Close when</span>
+              <strong>Latest scan confirms improvement</strong>
+              <p>{{ issue.fix_guidance.validation[0] }}</p>
+            </article>
+          </div>
+          <div class="issue-task-strip">
+            <span>{{ issue.occurrences }} occurrence(s)</span>
+            <span>{{ issue.pages }} page(s)</span>
+            <span>{{ issue.element }}</span>
+            <span>{{ issue.points }} points available</span>
+          </div>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

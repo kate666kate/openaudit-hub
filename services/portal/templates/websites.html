@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Websites | {{ title }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  </head>
+  <body class="si-page">
+    <header class="si-topbar">
+      <strong>OpenAudit</strong>
+      <nav aria-label="Account links"><a href="/">Dashboard</a><a href="/api/websites">API</a></nav>
+    </header>
+    <div class="si-layout">
+      {% include "partials/si_drawer.html" %}
+      <main class="si-main">
+        <div class="si-heading">
+          <div><p class="label">Administration</p><h1>Websites</h1><p>Manage every website, crawl scope, and scan schedule in one place.</p></div>
+        </div>
+        {% if error %}<div class="si-form-message error"><strong>Could not add website</strong><span>{{ error }}</span></div>{% endif %}
+        {% if created %}<div class="si-form-message success"><strong>Website added</strong><span>It is ready for its first scan.</span></div>{% endif %}
+
+        <section class="si-wide-card si-website-create">
+          <div class="si-card-head"><div><h2>Add website</h2><span>Start with the canonical homepage URL</span></div></div>
+          <form method="post" action="/websites" class="si-website-form">
+            <label><span>Name</span><input name="name" placeholder="TruVision LED"></label>
+            <label><span>Website URL</span><input name="base_url" type="url" placeholder="https://example.com.au/" required></label>
+            <label><span>Scan schedule</span><select name="schedule"><option value="manual">Manual</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></label>
+            <label><span>Maximum pages</span><input name="max_pages" type="number" min="1" max="10000" value="100"></label>
+            <label class="wide"><span>Excluded paths</span><input name="exclude_paths" placeholder="/admin, /checkout, /private"></label>
+            <button type="submit">Add website</button>
+          </form>
+        </section>
+
+        <section class="si-wide-card">
+          <div class="si-card-head"><div><h2>Managed websites</h2><span>{{ websites|length }} website(s)</span></div></div>
+          <div class="si-website-list">
+            {% for website in websites %}
+            <article>
+              <div class="si-website-identity">
+                <span class="si-site-state {% if website.active %}active{% endif %}"></span>
+                <div><strong>{{ website.name }}</strong><a href="{{ website.base_url }}" target="_blank" rel="noreferrer">{{ website.base_url }}</a></div>
+              </div>
+              <form method="post" action="/websites/{{ website.key }}" class="si-website-edit">
+                <label><span>Name</span><input name="name" value="{{ website.name }}"></label>
+                <label><span>Schedule</span><select name="schedule">{% for option in ['manual', 'daily', 'weekly', 'monthly'] %}<option value="{{ option }}" {% if website.schedule == option %}selected{% endif %}>{{ option|title }}</option>{% endfor %}</select></label>
+                <label><span>Max pages</span><input name="max_pages" type="number" min="1" max="10000" value="{{ website.max_pages }}"></label>
+                <label><span>Excluded paths</span><input name="exclude_paths" value="{{ website.exclude_paths }}"></label>
+                <label class="si-check"><input name="active" type="checkbox" {% if website.active %}checked{% endif %}><span>Active</span></label>
+                <div class="si-form-actions">
+                  <a href="/?site={{ website.key }}">Open dashboard</a>
+                  <button type="submit" formaction="/scans" name="website_key" value="{{ website.key }}">Run scan</button>
+                  <button type="submit" name="action" value="update">Save</button>
+                  <button class="danger" type="submit" name="action" value="delete">Delete</button>
+                </div>
+              </form>
+            </article>
+            {% else %}<p class="si-empty">No websites yet. Add the first website above.</p>{% endfor %}
+          </div>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

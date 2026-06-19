@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  </head>
+  <body class="si-page">
+    <header class="si-topbar">
+      <strong>OpenAudit</strong>
+      <nav aria-label="Account links">
+        <a href="#">Help Center</a>
+        <a href="#">Settings</a>
+        <a href="#">OpenAudit User</a>
+      </nav>
+    </header>
+
+    <div class="si-layout">
+      {% include "partials/si_drawer.html" %}
+
+      <main class="si-main" id="dashboard">
+        <section class="si-controls" aria-label="Dashboard filters">
+          <form class="si-select si-site-switcher" method="get" action="/">
+            <label for="site-select-dashboard">Site</label>
+            <select id="site-select-dashboard" name="site" onchange="this.form.submit()">
+              {% for site in site_options %}
+              <option value="{{ site.key }}" {% if selected_site_key == site.key %}selected{% endif %}>{{ site.label }}</option>
+              {% endfor %}
+            </select>
+          </form>
+          <div class="si-select">
+            <span>Group</span>
+            <strong>No group selected</strong>
+          </div>
+          <div class="si-select">
+            <span>Period</span>
+            <strong>This month</strong>
+          </div>
+          <div class="si-page-search">Search for a page</div>
+        </section>
+
+        <div class="si-heading">
+          <h1>Dashboard</h1>
+          <div class="si-heading-actions">
+            <a href="/modules/feature-coverage{% if selected_site_key %}?site={{ selected_site_key }}{% endif %}">Learn</a>
+            <a href="/api/modules" target="_blank" rel="noreferrer">API</a>
+            {% if lighthouse.report_href %}
+            <a href="{{ lighthouse.report_href }}" target="_blank" rel="noreferrer">Export</a>
+            {% endif %}
+          </div>
+        </div>
+
+        {% if lighthouse.ok %}
+        <section class="si-score-grid compact-dashboard" aria-label="Dashboard scores">
+          <article class="si-score-card">
+            <h2>Digital Certainty Index</h2>
+            <div class="si-gauge">
+              <div class="score-donut score-{{ lighthouse.overview_score|int if lighthouse.overview_score != 'n/a' else 0 }}">
+                <span>Score</span>
+                <strong>{{ lighthouse.overview_score }}</strong>
+                <em>/100</em>
+              </div>
+            </div>
+            <a class="si-card-button" href="/modules/issues{% if selected_site_key %}?site={{ selected_site_key }}{% endif %}">DCI overview</a>
+          </article>
+
+          <article class="si-score-card">
+            <h2>Quality Assurance</h2>
+            <div class="si-gauge">
+              <div class="score-donut score-{{ lighthouse.scores.get('Best Practices', '0')|int if lighthouse.scores.get('Best Practices') != 'n/a' else 0 }}">
+                <span>Score</span>
+                <strong>{{ lighthouse.scores.get('Best Practices', 'n/a') }}</strong>
+                <em>/100</em>
+              </div>
+            </div>
+            <a class="si-card-button" href="/modules/issues{% if selected_site_key %}?site={{ selected_site_key }}{% endif %}">Improve score</a>
+          </article>
+
+          <article class="si-score-card">
+            <h2>Accessibility</h2>
+            <div class="si-gauge">
+              <div class="score-donut score-{{ lighthouse.scores.get('Accessibility', '0')|int if lighthouse.scores.get('Accessibility') != 'n/a' else 0 }}">
+                <span>Score</span>
+                <strong>{{ lighthouse.scores.get('Accessibility', 'n/a') }}</strong>
+                <em>/100</em>
+              </div>
+            </div>
+            <a class="si-card-button" href="/modules/accessibility-overview{% if selected_site_key %}?site={{ selected_site_key }}{% endif %}">Open module</a>
+          </article>
+
+          <article class="si-score-card">
+            <h2>SEO</h2>
+            <div class="si-gauge">
+              <div class="score-donut score-{{ lighthouse.scores.get('SEO', '0')|int if lighthouse.scores.get('SEO') != 'n/a' else 0 }}">
+                <span>Score</span>
+                <strong>{{ lighthouse.scores.get('SEO', 'n/a') }}</strong>
+                <em>/100</em>
+              </div>
+            </div>
+            <a class="si-card-button" href="/modules/seo-advanced{% if selected_site_key %}?site={{ selected_site_key }}{% endif %}">Open module</a>
+          </article>
+        </section>
+
+        <section class="si-dashboard-summary">
+          <article class="si-wide-card">
+            <div class="si-card-head">
+              <h2>Top priority</h2>
+              {% if lighthouse.top_priority %}
+              <a href="{{ lighthouse.top_priority.href }}">Open full issue</a>
+              {% endif %}
+            </div>
+            {% if lighthouse.top_priority %}
+            <div class="si-priority-summary">
+              <div>
+                <strong>{{ lighthouse.top_priority.title }}</strong>
+                <p>{{ lighthouse.top_priority.recommendation }}</p>
+              </div>
+              <span>{{ lighthouse.top_priority.points }} points</span>
+              <span>{{ lighthouse.top_priority.difficulty }}</span>
+              <span>{{ lighthouse.top_priority.responsibility }}</span>
+            </div>
+            {% else %}
+            <p class="si-empty">No high-priority issue found in the latest crawl.</p>
+            {% endif %}
+          </article>
+
+          <article class="si-wide-card">
+            <div class="si-card-head">
+              <h2>Module status</h2>
+              <a href="/modules/feature-coverage{% if selected_site_key %}?site={{ selected_site_key }}{% endif %}">View all</a>
+            </div>
+            <div class="si-module-status-grid">
+              {% for module in lighthouse.feature_modules[:6] %}
+              <div>
+                <strong>{{ module.name }}</strong>
+                <span class="si-status si-status-{{ module.status|lower|replace(' ', '-') }}">{{ module.status }}</span>
+              </div>
+              {% endfor %}
+            </div>
+          </article>
+        </section>
+
+        <section class="si-wide-card si-action-plan-card">
+          <div class="si-card-head">
+            <div>
+              <h2>Activity plan</h2>
+              <span>Prioritized fixes from the latest crawl</span>
+            </div>
+            <div class="si-card-actions">
+              <a class="si-button-secondary" href="/api/action-plan{% if selected_site_key %}?site={{ selected_site_key }}{% endif %}" target="_blank" rel="noreferrer">API</a>
+              <a href="/modules/issues{% if selected_site_key %}?site={{ selected_site_key }}{% endif %}">View all issues</a>
+            </div>
+          </div>
+          <div class="si-action-plan">
+            {% for task in lighthouse.action_queue[:4] %}
+            <a href="{{ task.href }}" class="si-action-task">
+              <span class="si-action-rank">{{ task.rank }}</span>
+              <div class="si-action-main">
+                <strong>{{ task.title }}</strong>
+                <p>{{ task.next_step }}</p>
+                <small>{{ task.validation }}</small>
+              </div>
+              <div class="si-action-meta">
+                <span>{{ task.priority }}</span>
+                <span>{{ task.owner }}</span>
+                <span>{{ task.due }}</span>
+                <b>{{ task.points }} pts</b>
+              </div>
+            </a>
+            {% else %}
+            <p class="si-empty">No activity plan yet. Run Lighthouse to generate prioritized tasks.</p>
+            {% endfor %}
+          </div>
+        </section>
+
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>Trend monitor</h2>
+            <div class="si-card-actions">
+              <a class="si-button-secondary" href="/api/history/export.csv{% if selected_site_key %}?site={{ selected_site_key }}{% endif %}">Export CSV</a>
+              <a href="/api/history{% if selected_site_key %}?site={{ selected_site_key }}{% endif %}" target="_blank" rel="noreferrer">API</a>
+            </div>
+          </div>
+          <div class="si-trend-monitor">
+            <article class="si-trend-summary">
+              <span>Health</span>
+              <strong>{{ lighthouse.audit_history.health }}</strong>
+              <p>Latest {{ lighthouse.audit_history.latest_score }}/100 · {{ lighthouse.audit_history.delta }} since previous crawl</p>
+            </article>
+            <article>
+              <span>Crawls</span>
+              <strong>{{ lighthouse.audit_history.crawl_count }}</strong>
+              <p>{{ lighthouse.audit_history.regression_count }} category regression(s) in latest comparison</p>
+            </article>
+            <article>
+              <span>Baseline</span>
+              <strong>{{ lighthouse.audit_history.previous_score }}</strong>
+              <p>{{ lighthouse.audit_history.next_step }}</p>
+            </article>
+          </div>
+          <div class="si-trend-alerts">
+            {% for alert in lighthouse.audit_history.alerts %}
+            <article class="si-trend-alert si-trend-alert-{{ alert.severity|lower }}">
+              <strong>{{ alert.severity }}</strong>
+              <div>
+                <b>{{ alert.title }}</b>
+                <p>{{ alert.detail }}</p>
+              </div>
+            </article>
+            {% endfor %}
+          </div>
+          <div class="si-change-panel">
+            <div class="si-change-summary">
+              <article>
+                <span>New issues</span>
+                <strong>{{ lighthouse.audit_history.issue_changes.new_count }}</strong>
+              </article>
+              <article>
+                <span>Resolved issues</span>
+                <strong>{{ lighthouse.audit_history.issue_changes.resolved_count }}</strong>
+              </article>
+              <p>{{ lighthouse.audit_history.issue_changes.summary }}</p>
+            </div>
+            <div class="si-change-lists">
+              <article>
+                <h3>New in latest crawl</h3>
+                {% for issue in lighthouse.audit_history.issue_changes.new_issues %}
+                <a href="/issues/{{ issue.id }}{% if selected_site_key %}?site={{ selected_site_key }}{% endif %}">
+                  <strong>{{ issue.title }}</strong>
+                  <span>{{ issue.category }} &middot; {{ issue.points }} point(s) &middot; {{ issue.difficulty }}</span>
+                </a>
+                {% else %}
+                <p class="si-empty">No new issues compared with the previous crawl.</p>
+                {% endfor %}
+              </article>
+              <article>
+                <h3>Resolved since previous crawl</h3>
+                {% for issue in lighthouse.audit_history.issue_changes.resolved_issues %}
+                <div>
+                  <strong>{{ issue.title }}</strong>
+                  <span>{{ issue.category }} &middot; {{ issue.points }} point(s)</span>
+                </div>
+                {% else %}
+                <p class="si-empty">No resolved issues yet. Re-run after fixes to confirm progress.</p>
+                {% endfor %}
+              </article>
+            </div>
+          </div>
+          <div class="si-trend-categories">
+            {% for trend in lighthouse.audit_history.category_trends %}
+            <article>
+              <div>
+                <strong>{{ trend.category }}</strong>
+                <span>{{ trend.score }}/100 · {{ trend.delta }}</span>
+              </div>
+              <i><b style="width: {{ trend.bar }}%"></b></i>
+            </article>
+            {% endfor %}
+          </div>
+          <div class="si-trend-table">
+            <div class="si-trend-row si-trend-head">
+              <span>Crawl</span><span>Score</span><span>Delta</span><span>Regressions</span>
+            </div>
+            {% for row in lighthouse.audit_history.rows[:5] %}
+            <div class="si-trend-row">
+              <strong>{{ row.updated }}</strong>
+              <span>{{ row.overview if row.overview is not none else "n/a" }}</span>
+              <span>{{ row.delta_label }}</span>
+              <span>{{ row.regressions|length }}</span>
+            </div>
+            {% else %}
+            <p class="si-empty">No historical crawl data yet.</p>
+            {% endfor %}
+          </div>
+        </section>
+
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>Recent reports</h2>
+            <a href="/modules/reports{% if selected_site_key %}?site={{ selected_site_key }}{% endif %}">Open reports</a>
+          </div>
+          <div class="si-report-grid compact">
+            {% if reports %}
+            {% for report in reports[:3] %}
+            <a href="{{ report.href }}" target="_blank" rel="noreferrer">
+              <strong>{{ report.kind }}</strong>
+              <span>{{ report.name }}</span>
+              <small>{{ report.updated }}</small>
+            </a>
+            {% endfor %}
+            {% else %}
+            <p class="si-empty">No generated reports yet.</p>
+            {% endif %}
+          </div>
+        </section>
+        {% else %}
+        <section class="si-wide-card">
+          <h2>No Lighthouse report yet</h2>
+          <p>{{ lighthouse.error }}</p>
+          <code>powershell -ExecutionPolicy Bypass -File .\scripts\run-lighthouse-report.ps1 -Url {{ default_target_url }}</code>
+        </section>
+        {% endif %}
+      </main>
+    </div>
+  </body>
+</html>

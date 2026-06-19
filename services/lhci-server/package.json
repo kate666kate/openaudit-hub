@@ -1,0 +1,9 @@
+{
+  "name": "openaudit-lhci-server",
+  "private": true,
+  "version": "1.0.0",
+  "dependencies": {
+    "@lhci/server": "^0.15.1",
+    "sqlite3": "^5.1.7"
+  }
+}

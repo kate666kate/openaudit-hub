@@ -1,0 +1,9 @@
+{
+  "name": "openaudit-lighthouse-report",
+  "private": true,
+  "version": "1.0.0",
+  "dependencies": {
+    "lighthouse": "^12.6.1",
+    "pa11y": "^8.0.0"
+  }
+}

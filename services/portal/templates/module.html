@@ -1,0 +1,1086 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ page.title }} | {{ title }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  </head>
+  <body class="si-page">
+    <header class="si-topbar">
+      <strong>OpenAudit</strong>
+      <nav aria-label="Account links">
+        <a href="/">Dashboard</a>
+        <a href="#">Help Center</a>
+        <a href="#">Settings</a>
+      </nav>
+    </header>
+
+    <div class="si-layout">
+      {% include "partials/si_drawer.html" %}
+
+      <main class="si-main">
+        <section class="si-controls" aria-label="Module filters">
+          <form class="si-select si-site-switcher" method="get" action="/modules/{{ page.slug }}">
+            <label for="site-select-module">Site</label>
+            <select id="site-select-module" name="site" onchange="this.form.submit()">
+              {% for site in site_options %}
+              <option value="{{ site.key }}" {% if selected_site_key == site.key %}selected{% endif %}>{{ site.label }}</option>
+              {% endfor %}
+            </select>
+          </form>
+          <div class="si-select">
+            <span>Module</span>
+            <strong>{{ page.group }}</strong>
+          </div>
+          <div class="si-select">
+            <span>View</span>
+            <strong>{{ page.title }}</strong>
+          </div>
+          <div class="si-page-search">Search for a page</div>
+        </section>
+
+        <div class="si-heading">
+          <h1>{{ page.title }}</h1>
+          <div class="si-heading-actions">
+            <a href="/api/modules" target="_blank" rel="noreferrer">API</a>
+            {% if lighthouse.report_href %}
+            <a href="{{ lighthouse.report_href }}" target="_blank" rel="noreferrer">Export</a>
+            {% endif %}
+          </div>
+        </div>
+
+        {% if page.slug in ["issues", "accessibility-issues"] %}
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>Issues and recommendations</h2>
+            <span>{{ lighthouse.issue_count }} open issues</span>
+          </div>
+          <div class="si-metric-strip">
+            {% for item in lighthouse.score_breakdown %}
+            <article>
+              <span>{{ item.label }}</span>
+              <strong>{{ item.score }}</strong>
+              <div class="score-bar"><i class="bar-{{ item.status }}" style="width: {{ item.bar }}%"></i></div>
+            </article>
+            {% endfor %}
+          </div>
+          {% include "partials/si_issue_table.html" %}
+        </section>
+
+        {% if pa11y_issues %}
+        <section class="si-wide-card si-pa11y-card">
+          <div class="si-card-head">
+            <div><h2>Pa11y accessibility findings</h2><span>{{ pa11y_issues|length }} managed WCAG finding(s)</span></div>
+            <a href="/api/lifecycle/issues?site={{ selected_site_key }}" target="_blank" rel="noreferrer">Lifecycle API</a>
+          </div>
+          <div class="si-pa11y-list">
+            {% for issue in pa11y_issues %}
+            <article>
+              <div class="si-pa11y-copy">
+                <span>{{ issue.priority|title }} &middot; {{ issue.status|replace('_', ' ')|title }}</span>
+                <strong>{{ issue.title }}</strong>
+                <p>{{ issue.occurrences }} occurrence(s) across {{ issue.affected_pages }} page(s)</p>
+                <div class="si-pa11y-guidance">
+                  <span>How to fix</span>
+                  <strong>{{ issue.guidance.summary }}</strong>
+                  <p><b>Change in:</b> {{ issue.guidance.where }}</p>
+                  <p><b>Start with:</b> {{ issue.guidance.steps[0] }}</p>
+                  <details>
+                    <summary>Steps, code example, and acceptance check</summary>
+                    <ol>{% for step in issue.guidance.steps %}<li>{{ step }}</li>{% endfor %}</ol>
+                    <div class="si-pa11y-code-compare">
+                      <div><span>Before</span><pre>{{ issue.guidance.bad_example }}</pre></div>
+                      <div><span>After</span><pre>{{ issue.guidance.good_example }}</pre></div>
+                    </div>
+                    <p><b>Done when:</b> {{ issue.guidance.verify }}</p>
+                  </details>
+                </div>
+                {% if issue.evidence %}
+                <details>
+                  <summary>View code evidence</summary>
+                  {% for evidence in issue.evidence[:3] %}
+                  <div class="si-pa11y-evidence">
+                    {% if evidence.page_url %}<a href="{{ evidence.page_url }}" target="_blank" rel="noreferrer">{{ evidence.page_url }}</a>{% endif %}
+                    {% if evidence.selector %}<code>{{ evidence.selector }}</code>{% endif %}
+                    {% if evidence.snippet %}<pre>{{ evidence.snippet }}</pre>{% endif %}
+                  </div>
+                  {% endfor %}
+                </details>
+                {% endif %}
+              </div>
+              <form class="si-pa11y-action" method="post" action="/issues/lifecycle/{{ issue.id }}">
+                <input type="hidden" name="site" value="{{ selected_site_key }}">
+                <label><span>Status</span><select name="status">{% for status in ['open','assigned','in_progress','resolved','ignored'] %}<option value="{{ status }}" {% if issue.status == status %}selected{% endif %}>{{ status|replace('_',' ')|title }}</option>{% endfor %}</select></label>
+                <label><span>Owner</span><input name="owner" value="{{ issue.owner }}"></label>
+                <button type="submit">Save</button>
+              </form>
+            </article>
+            {% endfor %}
+          </div>
+        </section>
+        {% endif %}
+
+        {% elif page.slug == "issue-detail-preview" %}
+        {% if lighthouse.top_priority %}
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>{{ lighthouse.top_priority.title }}</h2>
+            <a href="{{ lighthouse.top_priority.href }}">Open full issue</a>
+          </div>
+          <div class="si-issue-detail-preview">
+            <div class="si-issue-detail-title">
+              <span class="si-alert-dot">!</span>
+              <div>
+                <h3>{{ lighthouse.top_priority.title }}</h3>
+                <p>{{ lighthouse.top_priority.recommendation }}</p>
+              </div>
+            </div>
+            <div class="si-issue-facts">
+              <article><span>Conformance</span><strong>{{ lighthouse.top_priority.conformance }}</strong></article>
+              <article><span>Points you can gain</span><strong>{{ lighthouse.top_priority.points }}</strong></article>
+              <article><span>Pages with this issue</span><strong>{{ lighthouse.top_priority.pages }}</strong></article>
+              <article><span>Occurrences</span><strong>{{ lighthouse.top_priority.occurrences }}</strong></article>
+              <article><span>Difficulty</span><strong>{{ lighthouse.top_priority.difficulty }}</strong></article>
+              <article><span>Responsibility</span><strong>{{ lighthouse.top_priority.responsibility }}</strong></article>
+            </div>
+          </div>
+        </section>
+        {% endif %}
+
+        {% elif page.slug == "accessibility-overview" %}
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>Accessibility overview</h2>
+            <a href="/modules/accessibility-issues{% if selected_site_key %}?site={{ selected_site_key }}{% endif %}">View issues</a>
+          </div>
+          <div class="si-accessibility-overview">
+            <div class="si-breakdown-list">
+              {% for item in lighthouse.accessibility_breakdown %}
+              <article>
+                <em>{{ item.code }}</em>
+                <div>
+                  <strong>{{ item.name }}</strong>
+                  <span>{{ item.score }}/100</span>
+                </div>
+                <div class="score-bar"><i class="bar-good" style="width: {{ item.score if item.score != 'n/a' else '0' }}%"></i></div>
+                <small>{{ item.issues }} issue(s)</small>
+              </article>
+              {% endfor %}
+            </div>
+            <div class="si-score-history">
+              <h3>Score history</h3>
+              <div class="si-mini-chart">
+                {% for point in lighthouse.score_history %}
+                <i style="height: {{ point.bar }}%"></i>
+                {% endfor %}
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {% elif page.slug == "seo-advanced" %}
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>SEO Advanced</h2>
+            <span>Overall {{ lighthouse.seo_advanced.overall }}/100</span>
+          </div>
+          <div class="si-icon-tabs">
+            {% for tab in lighthouse.seo_advanced.tabs %}
+            <article>
+              <strong>{{ tab.name }}</strong>
+              <span class="si-status si-status-{{ tab.status|lower|replace(' ', '-') }}">{{ tab.status }}</span>
+            </article>
+            {% endfor %}
+          </div>
+          <div class="si-seo-score-panel">
+            <div>
+              <h3>Score details</h3>
+              {% for item in lighthouse.seo_advanced.details %}
+              <article>
+                <span>{{ item.name }}</span>
+                <strong>{{ item.score }}/100</strong>
+                <div class="score-bar"><i class="bar-good" style="width: {{ item.bar }}%"></i></div>
+              </article>
+              {% endfor %}
+            </div>
+            <div class="si-focus-grid">
+              <article><strong>Highest impact</strong><p>Sort issues by points you can gain.</p></article>
+              <article><strong>Quick wins</strong><p>Find issues with lower difficulty.</p></article>
+              <article><strong>Occurrences</strong><p>Find repeated template-level issues.</p></article>
+            </div>
+          </div>
+        </section>
+
+        {% elif page.slug == "keyword-suggestions" %}
+        {% set keywords = lighthouse.keyword_suggestions %}
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>Keyword suggestions</h2>
+            <div class="si-card-actions">
+              <a class="si-button-secondary" href="/api/keyword-suggestions/export.csv?site={{ selected_site_key }}">Export briefs CSV</a>
+              <span class="si-status si-status-{{ keywords.status|lower|replace(' ', '-') }}">{{ keywords.status }}</span>
+            </div>
+          </div>
+          <div class="si-keyword-toolbar">
+            <div class="si-filter-control">
+              <span>Website</span>
+              <strong>{{ selected_site_label }}</strong>
+            </div>
+            <div class="si-filter-control">
+              <span>Period</span>
+              <strong>Latest crawl</strong>
+            </div>
+            <div class="si-filter-control">
+              <span>Source</span>
+              <strong>{{ keywords.source }}</strong>
+            </div>
+            <label class="si-keyword-search">
+              <span>Search keyword</span>
+              <input type="search" placeholder="Filter suggestions after export" disabled>
+            </label>
+          </div>
+          <div class="si-keyword-overview">
+            <article class="si-keyword-score">
+              <span>Keyword coverage score</span>
+              <strong>{{ keywords.overview.score }}</strong>
+              <small>/100 starter score</small>
+            </article>
+            <article>
+              <span>Points you can gain</span>
+              <strong>{{ keywords.overview.points_available }}</strong>
+              <small>estimated from crawl + SEO issues</small>
+            </article>
+            <article>
+              <span>Suggestions</span>
+              <strong>{{ keywords.overview.suggestions }}</strong>
+              <small>{{ keywords.overview.quick_wins }} quick win(s)</small>
+            </article>
+            <article>
+              <span>Pages reviewed</span>
+              <strong>{{ keywords.overview.pages }}</strong>
+              <small>{{ keywords.overview.issues_used }} issue signal(s)</small>
+            </article>
+          </div>
+          <div class="si-keyword-engine">
+            <span>Keyword engine</span>
+            <strong>{{ keywords.engine.content_extractor }}</strong>
+            <small>{{ keywords.engine.content_keywords }} content keyword(s) from {{ keywords.engine.content_pages_sampled }} sampled page(s)</small>
+          </div>
+          <div class="si-keyword-tabs">
+            {% for filter in keywords.filters %}
+            <span class="{{ 'active' if filter.active else '' }}">{{ filter.name }} <b>{{ filter.count }}</b></span>
+            {% endfor %}
+          </div>
+        </section>
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>Search Console insights</h2>
+            <span>{{ keywords.search_console.status }} &middot; {{ keywords.search_console.source }}</span>
+          </div>
+          {% if keywords.search_console.connected %}
+          <div class="si-keyword-table si-gsc-table">
+            <div class="si-keyword-row si-keyword-head">
+              <span>Query</span><span>Clicks</span><span>Impressions</span><span>CTR</span><span>Position</span><span>Landing page</span>
+            </div>
+            {% for row in keywords.search_console.rows %}
+            <div class="si-keyword-row">
+              <strong>{{ row.query }}<small>{{ row.source_file }}</small></strong>
+              <span>{{ row.clicks or "-" }}</span>
+              <span>{{ row.impressions or "-" }}</span>
+              <span>{{ row.ctr or "-" }}</span>
+              <span>{{ row.position or "-" }}</span>
+              <span>{{ row.page or "Query-only export" }}</span>
+            </div>
+            {% endfor %}
+          </div>
+          {% else %}
+          <div class="si-connector-setup">
+            <article>
+              <strong>Import Search Console CSV</strong>
+              <p>{{ keywords.search_console.next_step }}</p>
+            </article>
+            <article>
+              <strong>Recommended filename</strong>
+              <p><code>config/search-console/gsc-{{ selected_site_key }}.csv</code></p>
+            </article>
+            <article>
+              <strong>Useful columns</strong>
+              <p>Query, Page, Clicks, Impressions, CTR, Position</p>
+            </article>
+          </div>
+          {% endif %}
+        </section>
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>Suggestions and recommendations</h2>
+            <span>Sort by highest impact first</span>
+          </div>
+          {% if keywords.rows %}
+          <div class="si-keyword-table">
+            <div class="si-keyword-row si-keyword-head">
+              <span>Keyword</span><span>Intent</span><span>Occurrences</span><span>Difficulty</span><span>Points</span><span>Recommendation</span>
+            </div>
+            {% for row in keywords.rows %}
+            <div class="si-keyword-row">
+              <strong>{{ row.keyword }}<small>{{ row.reason }}</small></strong>
+              <span>{{ row.intent }}</span>
+              <span>{{ row.affected_pages }} page(s)</span>
+              <span class="si-status si-status-{{ row.difficulty|lower }}">{{ row.difficulty }}</span>
+              <span><b>{{ row.score_gain }}</b></span>
+              <span>{{ row.action }}</span>
+            </div>
+            {% endfor %}
+          </div>
+          {% else %}
+          <p class="si-empty">Run Lighthouse and the sitemap crawler for this website to generate starter keyword ideas.</p>
+          {% endif %}
+        </section>
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>Keyword-to-page map</h2>
+            <span>Avoid page cannibalisation</span>
+          </div>
+          {% if keywords.page_opportunities %}
+          <div class="si-keyword-table si-keyword-page-table">
+            <div class="si-keyword-row si-keyword-head">
+              <span>Landing page</span><span>Target phrase</span><span>Intent</span><span>Priority</span><span>Next edit</span>
+            </div>
+            {% for row in keywords.page_opportunities %}
+            <div class="si-keyword-row">
+              <strong><a href="{{ row.page }}" target="_blank" rel="noreferrer">{{ row.page }}</a></strong>
+              <span>{{ row.suggested_keyword }}</span>
+              <span>{{ row.intent }}</span>
+              <span>{{ row.priority }}</span>
+              <span>{{ row.action }}</span>
+            </div>
+            {% endfor %}
+          </div>
+          {% else %}
+          <p class="si-empty">No page opportunities yet. Add more pages to the website list or run the sitemap crawler.</p>
+          {% endif %}
+        </section>
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>Optimization briefs</h2>
+            <a class="si-button-secondary" href="/api/keyword-suggestions/export.csv?site={{ selected_site_key }}">Export edit list</a>
+          </div>
+          {% if keywords.optimization_briefs %}
+          <div class="si-brief-list">
+            {% for brief in keywords.optimization_briefs %}
+            <article>
+              <div class="si-brief-title">
+                <div>
+                  <span>{{ brief.intent }} &middot; {{ brief.priority }}</span>
+                  <h3>{{ brief.keyword }}</h3>
+                  <a href="{{ brief.page }}" target="_blank" rel="noreferrer">{{ brief.page }}</a>
+                </div>
+                <strong>{{ brief.points }} pts</strong>
+              </div>
+              <dl>
+                <dt>Title tag</dt><dd>{{ brief.title }}</dd>
+                <dt>H1</dt><dd>{{ brief.h1 }}</dd>
+                <dt>Meta description</dt><dd>{{ brief.meta }}</dd>
+                <dt>Intro copy</dt><dd>{{ brief.intro }}</dd>
+                <dt>Image alt</dt><dd>{{ brief.alt }}</dd>
+                <dt>Internal links</dt><dd>{{ brief.internal_links }}</dd>
+              </dl>
+            </article>
+            {% endfor %}
+          </div>
+          {% else %}
+          <p class="si-empty">Run a sitemap crawl and Lighthouse report to generate page-level SEO edit briefs.</p>
+          {% endif %}
+        </section>
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>Activity plan</h2>
+            <span>Recommended workflow</span>
+          </div>
+          <div class="si-keyword-plan">
+            {% for task in keywords.activity_plan %}
+            <article>
+              <b>{{ task.step }}</b>
+              <div>
+                <strong>{{ task.title }}</strong>
+                <p>{{ task.action }}</p>
+                <small>{{ task.owner }} &middot; {{ task.points }} point(s)</small>
+              </div>
+            </article>
+            {% endfor %}
+          </div>
+        </section>
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>Content gaps</h2>
+            <span>SEO checklist</span>
+          </div>
+          <div class="si-module-grid si-keyword-gap-grid">
+            {% for gap in keywords.content_gaps %}
+            <article>
+              <strong>{{ gap.area }}</strong>
+              <p>{{ gap.status }}. {{ gap.action }}</p>
+            </article>
+            {% endfor %}
+            <article>
+              <strong>Next connector</strong>
+              <p>{{ keywords.next_step }}</p>
+            </article>
+          </div>
+        </section>
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>Next integrations</h2>
+            <span>Make keyword data more real</span>
+          </div>
+          <div class="si-module-grid">
+            {% for integration in keywords.next_integrations %}
+            <article>
+              <strong>{{ integration.name }}</strong>
+              <p><b>{{ integration.status }}</b>. {{ integration.value }}</p>
+            </article>
+            {% endfor %}
+          </div>
+        </section>
+
+        {% elif page.slug in ["content-optimization", "duplicate-content"] %}
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>{{ page.title }}</h2>
+            <span>Connector needed</span>
+          </div>
+          <p class="si-empty">This Siteimprove-style SEO feature needs a content index, keyword source, or search-console connector. The module is represented so it can be wired without changing navigation later.</p>
+        </section>
+
+        {% elif page.slug in ["robots-indexing", "structured-data"] %}
+        {% set rows = lighthouse.crawler_summary.robots if page.slug == "robots-indexing" else lighthouse.crawler_summary.structured %}
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>{{ page.title }}</h2>
+            <span>{{ rows|length }} checks</span>
+          </div>
+          <div class="si-analytics-table">
+            <div class="si-analytics-row si-analytics-head">
+              <span>Check</span><span>Status</span><span>Value</span><span>Detail</span>
+            </div>
+            {% for check in rows %}
+            <div class="si-analytics-row">
+              <strong>{{ check.name }}</strong><span>{{ check.status }}</span><span>{{ check.value or "-" }}</span><span>{{ check.detail }}</span>
+            </div>
+            {% endfor %}
+          </div>
+        </section>
+
+        {% elif page.slug == "sitemaps" %}
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>Sitemaps</h2>
+            <span class="si-status si-status-{{ lighthouse.crawler_summary.sitemaps.status|lower|replace(' ', '-') }}">{{ lighthouse.crawler_summary.sitemaps.status }}</span>
+          </div>
+          <div class="si-module-grid">
+            <article>
+              <h3>Discovered pages</h3>
+              <p>{{ lighthouse.crawler_summary.sitemaps.url_count }} URL(s) from {{ lighthouse.crawler_summary.sitemaps.sitemap_count }} sitemap file(s).</p>
+            </article>
+            <article>
+              <h3>Sitemap source</h3>
+              <p>{{ lighthouse.crawler_summary.sitemaps.source or "Run the sitemap crawler to detect sitemap.xml" }}</p>
+            </article>
+            <article>
+              <h3>Errors</h3>
+              <p>{{ lighthouse.crawler_summary.sitemaps.error_count }} issue(s). {{ lighthouse.crawler_summary.sitemaps.next_step }}</p>
+            </article>
+          </div>
+          {% if lighthouse.crawler_summary.sitemaps.sample_pages %}
+          <div class="si-analytics-table">
+            <div class="si-analytics-row si-analytics-head">
+              <span>Discovered URL</span><span>Last modified</span><span>Change freq</span><span>Priority</span>
+            </div>
+            {% for page_item in lighthouse.crawler_summary.sitemaps.sample_pages %}
+            <div class="si-analytics-row">
+              <strong>{{ page_item.loc }}</strong><span>{{ page_item.lastmod or "-" }}</span><span>{{ page_item.changefreq or "-" }}</span><span>{{ page_item.priority or "-" }}</span>
+            </div>
+            {% endfor %}
+          </div>
+          {% endif %}
+          {% if lighthouse.crawler_summary.sitemaps.errors %}
+          <div class="si-analytics-table">
+            <div class="si-analytics-row si-analytics-head">
+              <span>Sitemap</span><span>Error</span><span></span><span></span>
+            </div>
+            {% for error in lighthouse.crawler_summary.sitemaps.errors %}
+            <div class="si-analytics-row">
+              <strong>{{ error.url }}</strong><span>{{ error.error }}</span><span></span><span></span>
+            </div>
+            {% endfor %}
+          </div>
+          {% endif %}
+          <div class="si-report-grid">
+            {% for report in lighthouse.crawler_summary.sitemaps.reports %}
+            <a href="{{ report.href }}" target="_blank" rel="noreferrer"><strong>{{ report.kind }}</strong><span>{{ report.name }}</span><small>{{ report.updated }}</small></a>
+            {% else %}
+            <p class="si-empty">No sitemap report yet.</p>
+            {% endfor %}
+          </div>
+        </section>
+
+        {% elif page.slug in ["content-quality", "spelling-readability"] %}
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>{{ page.title }}</h2>
+            <span class="si-status si-status-{{ lighthouse.content_quality.status|lower|replace(' ', '-') }}">{{ lighthouse.content_quality.status }}</span>
+          </div>
+          <div class="si-module-grid">
+            <article>
+              <h3>Content checks</h3>
+              <dl>
+                <dt>Open issues</dt><dd>{{ lighthouse.content_quality.issue_count }}</dd>
+                <dt>Source</dt><dd>Lighthouse + accessibility audit</dd>
+                <dt>Next connector</dt><dd>Vale / LanguageTool / textlint</dd>
+              </dl>
+            </article>
+            <article>
+              <h3>Editorial governance</h3>
+              <p>{{ lighthouse.content_quality.connector_note }}</p>
+            </article>
+            <article>
+              <h3>Publishing fit</h3>
+              <p>Use this page as the bridge between page quality issues and Drupal/SDP prepublish workflows.</p>
+            </article>
+          </div>
+          <div class="si-analytics-table">
+            <div class="si-analytics-row si-analytics-head">
+              <span>Check</span><span>Status</span><span>Value</span><span>Detail</span>
+            </div>
+            {% for check in lighthouse.content_quality.checks %}
+            <div class="si-analytics-row">
+              <strong>{{ check.name }}</strong><span>{{ check.status }}</span><span>{{ check.value or "-" }}</span><span>{{ check.detail }}</span>
+            </div>
+            {% endfor %}
+          </div>
+        </section>
+
+        {% elif page.slug == "pages" %}
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <div><h2>Crawl inventory</h2><span>{{ crawl_pages|length }} discovered page(s)</span></div>
+            <a href="/api/crawl-pages{% if selected_site_key %}?site={{ selected_site_key }}{% endif %}" target="_blank" rel="noreferrer">API</a>
+          </div>
+          <div class="si-page-table">
+            {% if crawl_pages %}
+            {% for page_item in crawl_pages %}
+            <article>
+              <div>
+                <strong>{{ page_item.title or "Untitled page" }}</strong>
+                <p><a href="{{ page_item.url }}" target="_blank" rel="noreferrer">{{ page_item.url }}</a></p>
+                {% if page_item.error %}<small>{{ page_item.error }}</small>{% endif %}
+              </div>
+              <span>HTTP {{ page_item.status_code or "-" }}</span>
+              <span>Depth {{ page_item.depth }}</span>
+              <span>{{ page_item.source|replace('-', ' ')|title }}</span>
+            </article>
+            {% endfor %}
+            {% elif lighthouse.pages_with_issues %}
+            {% for page_item in lighthouse.pages_with_issues %}
+            <article><div><strong>{{ page_item.title }}</strong><p>{{ page_item.url }}</p></div><span>{{ page_item.issues }} issues</span><span>{{ page_item.occurrences }} occurrences</span><span>{{ page_item.points }} points</span></article>
+            {% endfor %}
+            {% else %}
+            <p class="si-empty">No crawl inventory yet. Run a scan to discover sitemap and internal pages.</p>
+            {% endif %}
+          </div>
+        </section>
+
+        {% elif page.slug == "site-architecture" %}
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>Site architecture</h2>
+            <span class="si-status si-status-{{ lighthouse.architecture_summary.status|lower|replace(' ', '-') }}">{{ lighthouse.architecture_summary.status }}</span>
+          </div>
+          <div class="si-module-grid">
+            <article><h3>Host</h3><p>{{ lighthouse.architecture_summary.host }}</p></article>
+            <article><h3>Current scope</h3><p>{{ lighthouse.architecture_summary.url or "No crawled URL available" }}</p></article>
+            <article><h3>Next step</h3><p>{{ lighthouse.architecture_summary.next_step }}</p></article>
+          </div>
+          <div class="si-analytics-table">
+            <div class="si-analytics-row si-analytics-head">
+              <span>Area</span><span>Pages</span><span>Issues</span><span>Depth</span>
+            </div>
+            {% for row in lighthouse.architecture_summary.rows %}
+            <div class="si-analytics-row">
+              <strong>{{ row.area }}</strong><span>{{ row.pages }}</span><span>{{ row.issues }}</span><span>{{ row.depth }}</span>
+            </div>
+            {% endfor %}
+          </div>
+        </section>
+
+        {% elif page.slug == "crawl-comparison" %}
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>Crawl comparison</h2>
+            <span class="si-status si-status-{{ lighthouse.comparison_summary.status|lower|replace(' ', '-') }}">{{ lighthouse.comparison_summary.status }}</span>
+          </div>
+          <p class="si-empty">{{ lighthouse.comparison_summary.next_step }}</p>
+          <div class="si-analytics-table">
+            <div class="si-analytics-row si-analytics-head">
+              <span>Report</span><span>Score</span><span>Delta</span><span>Updated</span>
+            </div>
+            {% for row in lighthouse.comparison_summary.rows %}
+            <div class="si-analytics-row">
+              <strong>{{ row.report }}</strong><span>{{ row.score }}</span><span>{{ row.delta }}</span><span>{{ row.updated }}</span>
+            </div>
+            {% else %}
+            <p class="si-empty">No comparable crawl reports yet.</p>
+            {% endfor %}
+          </div>
+        </section>
+
+        {% elif page.slug == "broken-links" %}
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>Broken links</h2>
+            <span class="si-status si-status-{{ lighthouse.link_integrity.status|lower|replace(' ', '-') }}">{{ lighthouse.link_integrity.status }}</span>
+          </div>
+          <div class="si-module-grid">
+            <article>
+              <h3>Checked links</h3>
+              <p>{{ lighthouse.link_integrity.checked_count }} link(s) checked in the latest report.</p>
+            </article>
+            <article>
+              <h3>Errors</h3>
+              <p>{{ lighthouse.link_integrity.error_count }} broken or unreachable link(s).</p>
+            </article>
+            <article>
+              <h3>Warnings</h3>
+              <p>{{ lighthouse.link_integrity.warning_count }} warning(s) need review.</p>
+            </article>
+            {% for check in lighthouse.link_integrity.checks %}
+            <article>
+              <h3>{{ check.name }}</h3>
+              <p>{{ check.detail }}</p>
+              <span class="si-status si-status-{{ check.status|lower|replace(' ', '-') }}">{{ check.status }}</span>
+            </article>
+            {% endfor %}
+          </div>
+          {% if lighthouse.link_integrity.sample_errors %}
+          <div class="si-analytics-table">
+            <div class="si-analytics-row si-analytics-head">
+              <span>Sample link issue</span><span></span><span></span><span></span>
+            </div>
+            {% for error in lighthouse.link_integrity.sample_errors %}
+            <div class="si-analytics-row">
+              <strong>{{ error }}</strong><span></span><span></span><span></span>
+            </div>
+            {% endfor %}
+          </div>
+          {% endif %}
+          <div class="si-report-grid">
+            {% for report in lighthouse.link_integrity.reports %}
+            <a href="{{ report.href }}" target="_blank" rel="noreferrer">
+              <strong>{{ report.kind }}</strong>
+              <span>{{ report.name }}</span>
+              <small>{{ report.updated }}</small>
+            </a>
+            {% else %}
+            <p class="si-empty">No LinkChecker report yet. Run the link check script to populate this module.</p>
+            {% endfor %}
+          </div>
+        </section>
+
+        {% elif page.slug == "resolved" %}
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>Resolved issues</h2>
+            <span>{{ lighthouse.resolved_count }} fixed checks</span>
+          </div>
+          <div class="si-resolved-list">
+            {% for item in lighthouse.resolved_checks[:10] %}
+            <article>
+              <span>OK</span>
+              <div>
+                <strong>{{ item.title }}</strong>
+                <p>{{ item.category }}</p>
+              </div>
+              <em>{{ item.points }} points gained</em>
+            </article>
+            {% endfor %}
+          </div>
+        </section>
+
+        {% elif page.slug == "prepublish" %}
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>Prepublish checks</h2>
+            <span>CMS workflow planned</span>
+          </div>
+          <div class="si-module-grid">
+            {% for item in lighthouse.prepublish_summary %}
+            <article>
+              <h3>{{ item.name }} <span>{{ item.count }}</span></h3>
+              <p>{{ item.detail }}</p>
+              <span class="si-status si-status-{{ item.status|lower|replace(' ', '-') }}">{{ item.status }}</span>
+            </article>
+            {% endfor %}
+          </div>
+        </section>
+
+        {% elif page.slug in ["analytics-overview", "campaigns", "behaviour-maps"] %}
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>{{ page.title }}</h2>
+            <span class="si-status si-status-{{ matomo.status|lower|replace(' ', '-') }}">{{ matomo.status }}</span>
+          </div>
+          {% if not matomo.configured %}
+          <div class="si-connector-setup">
+            <div>
+              <h3>Connect Matomo for real analytics data</h3>
+              <p>Marketing Analytics needs visitor data from an analytics platform. OpenAudit now supports Matomo as the self-hosted open-source connector.</p>
+              <a href="{{ matomo.public_url }}" target="_blank" rel="noreferrer">Open Matomo</a>
+            </div>
+            <ol>
+              {% for step in matomo.setup_steps %}
+              <li>{{ step }}</li>
+              {% endfor %}
+            </ol>
+          </div>
+          {% endif %}
+
+          {% if page.slug == "analytics-overview" %}
+          <div class="si-metric-strip">
+            <article><span>Visits</span><strong>{{ matomo.analytics.visits }}</strong></article>
+            <article><span>Page views</span><strong>{{ matomo.analytics.page_views }}</strong></article>
+            <article><span>Actions</span><strong>{{ matomo.analytics.actions }}</strong></article>
+            <article><span>Bounce rate</span><strong>{{ matomo.analytics.bounce_rate }}</strong></article>
+          </div>
+          <div class="si-module-grid">
+            <article>
+              <h3>Analytics source</h3>
+              <dl>
+                <dt>Status</dt><dd>{{ matomo.analytics.status }}</dd>
+                <dt>Period</dt><dd>{{ matomo.period }}</dd>
+                <dt>Site ID</dt><dd>{{ matomo.site_id }}</dd>
+              </dl>
+            </article>
+            <article>
+              <h3>Quality context</h3>
+              <dl>
+                <dt>Audit issues</dt><dd>{{ lighthouse.analytics_summary.key_metrics_used }}</dd>
+                <dt>Reports</dt><dd>{{ lighthouse.analytics_summary.reports }}</dd>
+                <dt>Avg time on site</dt><dd>{{ matomo.analytics.avg_time_on_site }}</dd>
+              </dl>
+            </article>
+            <article>
+              <h3>Next connector</h3>
+              <dl>
+                <dt>Email marketing</dt><dd>Mautic or listmonk</dd>
+                <dt>CMS publishing</dt><dd>Drupal JSON:API</dd>
+                <dt>Campaign ops</dt><dd>{{ matomo.campaigns.shortener }}</dd>
+              </dl>
+            </article>
+          </div>
+          {% elif page.slug == "campaigns" %}
+          <div class="si-module-grid">
+            <article>
+              <h3>Campaign status</h3>
+              <dl>
+                <dt>Status</dt><dd>{{ matomo.campaigns.status }}</dd>
+                <dt>Monitored campaigns</dt><dd>{{ matomo.campaigns.monitored_campaigns }}</dd>
+                <dt>UTM links</dt><dd>{{ matomo.campaigns.utm_links }}</dd>
+              </dl>
+            </article>
+            <article>
+              <h3>Email marketing path</h3>
+              <p>Mautic is the stronger Vision6-style open-source option for forms, segments, email campaigns and lead scoring. listmonk is better if you only need newsletters.</p>
+            </article>
+            <article>
+              <h3>Short URLs</h3>
+              <p>{{ matomo.campaigns.shortener }}</p>
+            </article>
+          </div>
+          <div class="si-analytics-table">
+            <div class="si-analytics-row si-analytics-head">
+              <span>Campaign</span><span>Visits</span><span>Actions</span><span>Bounce rate</span>
+            </div>
+            {% for campaign in matomo.campaigns.top_campaigns %}
+            <div class="si-analytics-row">
+              <strong>{{ campaign.name }}</strong><span>{{ campaign.visits }}</span><span>{{ campaign.actions }}</span><span>{{ campaign.bounce_rate }}</span>
+            </div>
+            {% else %}
+            <p class="si-empty">No Matomo campaign rows yet. Add UTM links such as <code>utm_campaign</code> to see data here.</p>
+            {% endfor %}
+          </div>
+          {% elif page.slug == "behaviour-maps" %}
+          <div class="si-metric-strip">
+            <article><span>Live visitors</span><strong>{{ matomo.behavior.live_visitors }}</strong></article>
+            <article><span>Heat map</span><strong>{{ matomo.behavior.heat_map }}</strong></article>
+            <article><span>Click map</span><strong>{{ matomo.behavior.click_map }}</strong></article>
+            <article><span>Scroll map</span><strong>{{ matomo.behavior.scroll_map }}</strong></article>
+          </div>
+          <div class="si-analytics-table">
+            <div class="si-analytics-row si-analytics-head">
+              <span>Page</span><span>Views</span><span>Unique visits</span><span>Avg time</span>
+            </div>
+            {% for item in matomo.behavior.top_pages %}
+            <div class="si-analytics-row">
+              <strong>{{ item.page }}</strong><span>{{ item.views }}</span><span>{{ item.unique_views }}</span><span>{{ item.avg_time }}</span>
+            </div>
+            {% else %}
+            <p class="si-empty">No Matomo page behaviour rows yet. Add the Matomo tracking script to the target site and wait for traffic.</p>
+            {% endfor %}
+          </div>
+          {% endif %}
+        </section>
+
+        {% elif page.slug == "email-marketing" %}
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>Email marketing</h2>
+            <span class="si-status si-status-{{ marketing.status|lower|replace(' ', '-') }}">{{ marketing.status }}</span>
+          </div>
+          <div class="si-connector-setup">
+            <div>
+              <h3>{{ marketing.platform }} connector</h3>
+              <p>{{ marketing.recommended_for }}</p>
+              <a href="{{ marketing.public_url }}" target="_blank" rel="noreferrer">Open Mautic</a>
+            </div>
+            <ol>
+              {% for step in marketing.setup_steps %}
+              <li>{{ step }}</li>
+              {% endfor %}
+            </ol>
+          </div>
+          <div class="si-module-grid">
+            {% for item in marketing.vision6_match %}
+            <article>
+              <h3>{{ item.capability }}</h3>
+              <p>{{ item.detail }}</p>
+              <span class="si-status si-status-{{ item.status|lower|replace(' ', '-') }}">{{ item.status }}</span>
+            </article>
+            {% endfor %}
+          </div>
+        </section>
+
+        {% elif page.slug == "drupal-sdp-publishing" %}
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>Drupal / SDP publishing</h2>
+            <span class="si-status si-status-{{ publishing.status|lower|replace(' ', '-') }}">{{ publishing.status }}</span>
+          </div>
+          {% if not publishing.configured %}
+          <div class="si-connector-setup">
+            <div>
+              <h3>Connect a Drupal-based publishing platform</h3>
+              <p>This connector is designed for Drupal and SDP-style publishing workflows: content inventory, metadata readiness and prepublish governance.</p>
+            </div>
+            <ol>
+              {% for step in publishing.setup_steps %}
+              <li>{{ step }}</li>
+              {% endfor %}
+            </ol>
+          </div>
+          {% elif publishing.error %}
+          <p class="si-empty">{{ publishing.error }}</p>
+          {% endif %}
+          <div class="si-module-grid">
+            {% for check in publishing.checks %}
+            <article>
+              <h3>{{ check.name }}</h3>
+              <p>{{ check.detail }}</p>
+              <span class="si-status si-status-{{ check.status|lower|replace(' ', '-') }}">{{ check.status }}</span>
+            </article>
+            {% endfor %}
+          </div>
+          <div class="si-analytics-table">
+            <div class="si-analytics-row si-analytics-head">
+              <span>Resource type</span><span>Status</span><span>JSON:API</span><span>Source</span>
+            </div>
+            {% for item in publishing.content_types %}
+            <div class="si-analytics-row">
+              <strong>{{ item.type }}</strong><span>{{ item.status }}</span><span>Enabled</span><span><a href="{{ item.href }}" target="_blank" rel="noreferrer">Open</a></span>
+            </div>
+            {% else %}
+            <p class="si-empty">No Drupal JSON:API resources detected yet.</p>
+            {% endfor %}
+          </div>
+        </section>
+
+        {% elif page.slug == "documents-pdfs" %}
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>Documents and PDFs</h2>
+            <span class="si-status si-status-{{ lighthouse.document_governance.status|lower|replace(' ', '-') }}">{{ lighthouse.document_governance.status }}</span>
+          </div>
+          <div class="si-module-grid">
+            {% for check in lighthouse.document_governance.checks %}
+            <article>
+              <h3>{{ check.name }}</h3>
+              <p>{{ check.detail }}</p>
+              <span class="si-status si-status-{{ check.status|lower|replace(' ', '-') }}">{{ check.status }}</span>
+            </article>
+            {% endfor %}
+          </div>
+          <div class="si-report-grid">
+            {% for report in lighthouse.document_governance.reports %}
+            <a href="{{ report.href }}" target="_blank" rel="noreferrer">
+              <strong>{{ report.kind }}</strong>
+              <span>{{ report.name }}</span>
+              <small>{{ report.updated }}</small>
+            </a>
+            {% else %}
+            <p class="si-empty">No document governance report yet. This page is ready for a PDF/Office crawler connector.</p>
+            {% endfor %}
+          </div>
+        </section>
+
+        {% elif page.slug == "policy" %}
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>Policy</h2>
+            <span>{{ lighthouse.policy_summary|length }} active policies</span>
+          </div>
+          <div class="policy-list">
+            {% for policy in lighthouse.policy_summary %}
+            <article>
+              <div>
+                <strong>{{ policy.name }}</strong>
+                <p>{{ policy.description }}</p>
+              </div>
+              <span>{{ policy.issues }} issues</span>
+              <em class="review-pill">{{ policy.status }}</em>
+            </article>
+            {% endfor %}
+          </div>
+        </section>
+
+        {% elif page.slug in ["privacy-cookies", "uptime-response"] %}
+        {% set module = lighthouse.privacy_summary if page.slug == "privacy-cookies" else lighthouse.response_summary %}
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>{{ page.title }}</h2>
+            <span class="si-status si-status-{{ module.status|lower|replace(' ', '-') }}">{{ module.status }}</span>
+          </div>
+          <div class="si-module-grid">
+            <article>
+              <h3>Module note</h3>
+              <p>{{ module.cookie_note if page.slug == "privacy-cookies" else module.uptime_note }}</p>
+            </article>
+            <article>
+              <h3>Current source</h3>
+              <p>Lighthouse security, browser-permission and response audits from the latest crawl.</p>
+            </article>
+            <article>
+              <h3>Next connector</h3>
+              <p>{{ "CMP/cookie crawler" if page.slug == "privacy-cookies" else "Uptime Kuma or status monitor" }}</p>
+            </article>
+          </div>
+          <div class="si-analytics-table">
+            <div class="si-analytics-row si-analytics-head">
+              <span>Check</span><span>Status</span><span>Value</span><span>Detail</span>
+            </div>
+            {% for check in module.checks %}
+            <div class="si-analytics-row">
+              <strong>{{ check.name }}</strong><span>{{ check.status }}</span><span>{{ check.value or "-" }}</span><span>{{ check.detail }}</span>
+            </div>
+            {% endfor %}
+          </div>
+        </section>
+
+        {% elif page.slug == "integrations" %}
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>Integrations</h2>
+            <span>{{ lighthouse.connector_summary|length }} connectors</span>
+          </div>
+          <div class="si-feature-table">
+            <div class="si-feature-row si-feature-head">
+              <span>Connector</span>
+              <span>Status</span>
+              <span>Purpose</span>
+            </div>
+            {% for connector in lighthouse.connector_summary %}
+            <div class="si-feature-row">
+              <strong>{{ connector.name }}</strong>
+              <span class="si-status si-status-{{ connector.status|lower|replace(' ', '-') }}">{{ connector.status }}</span>
+              <span>{{ connector.detail }}</span>
+            </div>
+            {% endfor %}
+          </div>
+        </section>
+
+        {% elif page.slug == "ai-recommendations" %}
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>AI recommendations</h2>
+            <span class="si-status si-status-{{ lighthouse.ai_recommendations.status|lower|replace(' ', '-') }}">{{ lighthouse.ai_recommendations.status }}</span>
+          </div>
+          <p class="si-empty">{{ lighthouse.ai_recommendations.guardrail }}</p>
+          <div class="si-analytics-table">
+            <div class="si-analytics-row si-analytics-head">
+              <span>Issue</span><span>Owner</span><span>Risk</span><span>Prompt seed</span>
+            </div>
+            {% for item in lighthouse.ai_recommendations.rows %}
+            <div class="si-analytics-row">
+              <strong><a href="{{ item.href }}">{{ item.title }}</a></strong><span>{{ item.owner }}</span><span>{{ item.risk }}</span><span>{{ item.prompt }}</span>
+            </div>
+            {% else %}
+            <p class="si-empty">No issue recommendations yet.</p>
+            {% endfor %}
+          </div>
+        </section>
+
+        {% elif page.slug == "standards" %}
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>{{ lighthouse.standards_engine.name }}</h2>
+            <a href="/api/standards{% if selected_site_key %}?site={{ selected_site_key }}{% endif %}" target="_blank" rel="noreferrer">API</a>
+          </div>
+          <p class="si-empty">{{ lighthouse.standards_engine.description }}</p>
+          <div class="si-standard-list">
+            {% for item in lighthouse.export_formats %}
+            <span>{{ item.name }} <em>{{ item.status }}</em></span>
+            {% endfor %}
+          </div>
+        </section>
+
+        {% elif page.slug == "reports" %}
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>Recent reports</h2>
+            <span>{{ reports|length }} generated</span>
+          </div>
+          <div class="si-report-grid">
+            {% for report in reports %}
+            <a href="{{ report.href }}" target="_blank" rel="noreferrer">
+              <strong>{{ report.kind }}</strong>
+              <span>{{ report.name }}</span>
+              <small>{{ report.updated }}</small>
+            </a>
+            {% endfor %}
+          </div>
+        </section>
+
+        {% elif page.slug == "feature-coverage" %}
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>Feature coverage against Siteimprove-style modules</h2>
+            <span>{{ lighthouse.feature_modules|length }} modules tracked</span>
+          </div>
+          <div class="si-feature-table">
+            <div class="si-feature-row si-feature-head">
+              <span>Module</span>
+              <span>Status</span>
+              <span>Implementation note</span>
+            </div>
+            {% for module in lighthouse.feature_modules %}
+            <div class="si-feature-row">
+              <strong>{{ module.name }}</strong>
+              <span class="si-status si-status-{{ module.status|lower|replace(' ', '-') }}">{{ module.status }}</span>
+              <span>{{ module.detail }}</span>
+            </div>
+            {% endfor %}
+          </div>
+        </section>
+        {% endif %}
+      </main>
+    </div>
+  </body>
+</html>
