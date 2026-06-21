@@ -3197,6 +3197,246 @@ a:hover {
   background: #fee4e2;
 }
 
+.si-breadcrumbs {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  margin-bottom: 18px;
+  color: #64748b;
+  font-size: 0.86rem;
+}
+
+.si-breadcrumbs a,
+.si-inspector-url,
+.si-inspector-findings h3 a {
+  color: #175cd3;
+}
+
+.si-inspector-heading {
+  align-items: flex-end;
+}
+
+.si-inspector-heading h1 {
+  max-width: 900px;
+  margin: 4px 0 8px;
+  font-size: clamp(1.8rem, 3vw, 2.55rem);
+  font-weight: 650;
+  line-height: 1.12;
+}
+
+.si-inspector-url {
+  display: block;
+  overflow: hidden;
+  max-width: 900px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.si-heading-actions .primary {
+  border-color: #175cd3;
+  color: #fff;
+  background: #175cd3;
+}
+
+.si-inspector-summary {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(130px, 1fr));
+  margin-bottom: 20px;
+  border: 1px solid #d5dce5;
+  background: #fff;
+  box-shadow: 0 2px 7px rgba(15, 23, 42, 0.06);
+}
+
+.si-inspector-summary article {
+  min-width: 0;
+  padding: 18px;
+  border-right: 1px solid #e5e9ef;
+}
+
+.si-inspector-summary article:last-child {
+  border-right: 0;
+}
+
+.si-inspector-summary span,
+.si-inspector-meta,
+.si-inspector-badges {
+  color: #64748b;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.si-inspector-summary strong {
+  display: block;
+  overflow: hidden;
+  margin-top: 8px;
+  color: #162033;
+  font-size: 1.25rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.si-inspector-summary strong.good {
+  color: #067647;
+}
+
+.si-inspector-summary strong.bad {
+  color: #b42318;
+}
+
+.si-inspector-alert {
+  margin-bottom: 20px;
+  padding: 16px 18px;
+  border: 1px solid #f7b7b2;
+  border-left: 5px solid #d92d20;
+  background: #fff4f3;
+}
+
+.si-inspector-alert p {
+  margin: 5px 0 0;
+}
+
+.si-inspector-list > article {
+  padding: 22px;
+  border-bottom: 1px solid #e4e9ef;
+}
+
+.si-inspector-list > article:last-child {
+  border-bottom: 0;
+}
+
+.si-inspector-issue-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  align-items: start;
+}
+
+.si-inspector-issue-head h3 {
+  margin: 8px 0 0;
+  font-size: 1.1rem;
+}
+
+.si-inspector-issue-head > strong {
+  padding: 5px 9px;
+  border-radius: 999px;
+  color: #344054;
+  background: #f2f4f7;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.si-inspector-badges,
+.si-inspector-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px 14px;
+}
+
+.si-inspector-badges span {
+  padding: 3px 7px;
+  border-radius: 3px;
+  color: #344054;
+  background: #eef2f6;
+}
+
+.si-inspector-badges .priority-high {
+  color: #b42318;
+  background: #fee4e2;
+}
+
+.si-inspector-badges .priority-medium {
+  color: #b54708;
+  background: #fef0c7;
+}
+
+.si-inspector-meta {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid #eef1f5;
+  text-transform: none;
+}
+
+.si-inspector-evidence {
+  margin-top: 14px;
+  border: 1px solid #d8e0e8;
+  background: #f8fafc;
+}
+
+.si-inspector-evidence summary {
+  padding: 12px 14px;
+  cursor: pointer;
+  font-weight: 750;
+}
+
+.si-inspector-evidence p {
+  margin: 0;
+  padding: 0 14px 12px;
+  color: #475467;
+}
+
+.si-inspector-evidence pre {
+  overflow: auto;
+  margin: 0;
+  padding: 14px;
+  color: #e2e8f0;
+  background: #111827;
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+}
+
+.si-inspector-empty {
+  padding: 42px 24px;
+  text-align: center;
+}
+
+.si-inspector-empty strong {
+  font-size: 1.15rem;
+}
+
+.si-inspector-empty p {
+  max-width: 620px;
+  margin: 8px auto 18px;
+  color: #64748b;
+}
+
+@media (max-width: 1250px) {
+  .si-inspector-summary {
+    grid-template-columns: repeat(3, minmax(150px, 1fr));
+  }
+
+  .si-inspector-summary article:nth-child(3) {
+    border-right: 0;
+  }
+
+  .si-inspector-summary article:nth-child(-n + 3) {
+    border-bottom: 1px solid #e5e9ef;
+  }
+}
+
+@media (max-width: 720px) {
+  .si-inspector-heading,
+  .si-inspector-issue-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .si-inspector-summary {
+    grid-template-columns: repeat(2, minmax(120px, 1fr));
+  }
+
+  .si-inspector-summary article,
+  .si-inspector-summary article:nth-child(3) {
+    border-right: 1px solid #e5e9ef;
+    border-bottom: 1px solid #e5e9ef;
+  }
+
+  .si-inspector-summary article:nth-child(even) {
+    border-right: 0;
+  }
+}
+
 .si-heading {
   display: flex;
   justify-content: space-between;

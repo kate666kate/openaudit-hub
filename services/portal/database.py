@@ -359,6 +359,45 @@ def list_crawl_pages(website_key_value: str, limit: int = 500) -> list[dict[str,
         return [crawl_page_dict(row) for row in session.scalars(statement)]
 
 
+def get_crawl_page(website_key_value: str, url: str) -> dict[str, Any] | None:
+    with SessionLocal() as session:
+        row = session.scalar(
+            select(CrawlPage).where(
+                CrawlPage.website_key == website_key_value,
+                CrawlPage.url == url,
+            )
+        )
+        return crawl_page_dict(row) if row else None
+
+
+def list_issues_for_page(website_key_value: str, url: str) -> list[dict[str, Any]]:
+    with SessionLocal() as session:
+        statement = (
+            select(AuditIssue)
+            .join(IssueEvidence, IssueEvidence.audit_issue_id == AuditIssue.id)
+            .where(
+                AuditIssue.website_key == website_key_value,
+                IssueEvidence.page_url == url,
+            )
+            .distinct()
+            .order_by(AuditIssue.points.desc(), AuditIssue.updated_at.desc())
+        )
+        rows = []
+        for issue in session.scalars(statement):
+            evidence = session.scalars(
+                select(IssueEvidence)
+                .where(
+                    IssueEvidence.audit_issue_id == issue.id,
+                    IssueEvidence.page_url == url,
+                )
+                .order_by(IssueEvidence.captured_at.desc())
+            )
+            item = issue_dict(issue)
+            item["evidence"] = [evidence_dict(entry) for entry in evidence]
+            rows.append(item)
+        return rows
+
+
 def reconcile_issues(
     website_key_value: str,
     issues: list[dict[str, Any]],

@@ -63,6 +63,42 @@ class PortalTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()[0]["title"], "Services")
 
+    def test_page_inspector_shows_only_selected_website_evidence(self) -> None:
+        website = database.ensure_website("https://inspector.example.com", "Inspector test")
+        page_url = "https://inspector.example.com/contact"
+        database.replace_crawl_pages(website["key"], [{
+            "url": page_url,
+            "title": "Contact us",
+            "status_code": 200,
+            "depth": 1,
+            "source": "sitemap",
+            "content_type": "text/html",
+        }])
+        database.reconcile_issues(website["key"], [{
+            "id": "image-alt",
+            "title": "Images must have alternate text",
+            "source": "pa11y",
+            "category": "Accessibility",
+            "points": 3,
+            "affected_examples": [{
+                "page_url": page_url,
+                "selector": "main img.hero",
+                "snippet": '<img class="hero">',
+                "explanation": "Add meaningful alternative text.",
+            }],
+        }], "pa11y.json", scanned_sources={"pa11y"})
+
+        response = self.client.get(f"/pages/inspect?site={website['key']}&url={page_url}")
+        html = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Contact us", html)
+        self.assertIn("Images must have alternate text", html)
+        self.assertIn("main img.hero", html)
+
+        other = database.ensure_website("https://other-inspector.example.com", "Other inspector")
+        cross_site = self.client.get(f"/pages/inspect?site={other['key']}&url={page_url}")
+        self.assertEqual(cross_site.status_code, 404)
+
 
 if __name__ == "__main__":
     unittest.main()

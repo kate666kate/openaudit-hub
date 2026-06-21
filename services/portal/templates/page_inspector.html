@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ crawl_page.title or "Page inspector" }} | {{ title }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  </head>
+  <body class="si-page">
+    <header class="si-topbar">
+      <strong>OpenAudit</strong>
+      <nav aria-label="Account links"><a href="/">Dashboard</a><a href="/modules/pages?site={{ selected_site_key }}">Page inventory</a></nav>
+    </header>
+    <div class="si-layout">
+      {% include "partials/si_drawer.html" %}
+      <main class="si-main">
+        <nav class="si-breadcrumbs" aria-label="Breadcrumb">
+          <a href="/modules/pages?site={{ selected_site_key }}">Pages</a><span>/</span><strong>Page inspector</strong>
+        </nav>
+
+        <div class="si-heading si-inspector-heading">
+          <div>
+            <p class="label">Page inspector</p>
+            <h1>{{ crawl_page.title or "Untitled page" }}</h1>
+            <a class="si-inspector-url" href="{{ crawl_page.url }}" target="_blank" rel="noreferrer">{{ crawl_page.url }}</a>
+          </div>
+          <div class="si-heading-actions">
+            <a href="/modules/pages?site={{ selected_site_key }}">Back to inventory</a>
+            <a class="primary" href="{{ crawl_page.url }}" target="_blank" rel="noreferrer">Open live page</a>
+          </div>
+        </div>
+
+        <section class="si-inspector-summary" aria-label="Page crawl summary">
+          <article><span>HTTP status</span><strong class="{{ 'bad' if crawl_page.status_code >= 400 else 'good' }}">{{ crawl_page.status_code or "Unknown" }}</strong></article>
+          <article><span>Open issues</span><strong>{{ open_issue_count }}</strong></article>
+          <article><span>All findings</span><strong>{{ page_issues|length }}</strong></article>
+          <article><span>Crawl depth</span><strong>{{ crawl_page.depth }}</strong></article>
+          <article><span>Discovered by</span><strong>{{ crawl_page.source|replace('-', ' ')|title }}</strong></article>
+          <article><span>Content type</span><strong>{{ crawl_page.content_type or "Unknown" }}</strong></article>
+        </section>
+
+        {% if crawl_page.error %}
+        <section class="si-inspector-alert"><strong>Crawl error</strong><p>{{ crawl_page.error }}</p></section>
+        {% endif %}
+
+        <section class="si-wide-card si-inspector-findings">
+          <div class="si-card-head">
+            <div><h2>Findings on this page</h2><span>Lighthouse and Pa11y evidence scoped to {{ selected_site.label }}</span></div>
+            <span>{{ page_issues|length }} finding(s)</span>
+          </div>
+          <div class="si-inspector-list">
+            {% for issue in page_issues %}
+            <article>
+              <div class="si-inspector-issue-head">
+                <div>
+                  <div class="si-inspector-badges"><span>{{ issue.source|title }}</span><span>{{ issue.category }}</span><span class="priority-{{ issue.priority }}">{{ issue.priority|title }}</span></div>
+                  <h3><a href="/issues/{{ issue.audit_id or issue.issue_key }}?site={{ selected_site_key }}">{{ issue.title }}</a></h3>
+                </div>
+                <strong>{{ issue.status|replace('_', ' ')|title }}</strong>
+              </div>
+              <div class="si-inspector-meta"><span>Owner: {{ issue.owner }}</span><span>{{ issue.occurrences }} occurrence(s)</span><span>{{ '%.1f'|format(issue.points) }} points</span></div>
+              {% for evidence in issue.evidence %}
+              <details class="si-inspector-evidence" {% if loop.first %}open{% endif %}>
+                <summary>Element evidence{% if evidence.selector %}: <code>{{ evidence.selector }}</code>{% endif %}</summary>
+                {% if evidence.explanation %}<p>{{ evidence.explanation }}</p>{% endif %}
+                {% if evidence.snippet %}<pre><code>{{ evidence.snippet }}</code></pre>{% endif %}
+              </details>
+              {% endfor %}
+            </article>
+            {% else %}
+            <div class="si-inspector-empty"><strong>No scanner findings for this page</strong><p>The page is in the crawl inventory, but the latest Lighthouse and Pa11y runs did not attach an issue to it.</p><a href="/scans?site={{ selected_site_key }}">Run another scan</a></div>
+            {% endfor %}
+          </div>
+        </section>
+      </main>
+    </div>
+    <script src="/static/app.js" defer></script>
+  </body>
+</html>

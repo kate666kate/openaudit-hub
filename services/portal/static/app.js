@@ -124,7 +124,7 @@
           return terms.every((term) => haystack.includes(term));
         }).slice(0, 8);
         results.innerHTML = matches.length
-          ? matches.map((page) => `<a role="option" href="${escapeHtml(page.url)}" target="_blank" rel="noreferrer"><strong>${escapeHtml(page.title || "Untitled page")}</strong><span>${escapeHtml(page.url)}</span><em class="status-${Number(page.status_code) >= 400 ? "bad" : "good"}">${escapeHtml(page.status_code || "-")}</em></a>`).join("")
+          ? matches.map((page) => `<a role="option" href="/pages/inspect?site=${encodeURIComponent(site)}&url=${encodeURIComponent(page.url)}"><strong>${escapeHtml(page.title || "Untitled page")}</strong><span>${escapeHtml(page.url)}</span><em class="status-${Number(page.status_code) >= 400 ? "bad" : "good"}">${escapeHtml(page.status_code || "-")}</em></a>`).join("")
           : '<p class="si-search-empty">No crawled pages match this search</p>';
       }).catch(() => {
         results.innerHTML = '<p class="si-search-empty">Could not load the page inventory</p>';

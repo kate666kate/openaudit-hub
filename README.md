@@ -24,6 +24,7 @@ OpenAudit Hub 将成熟的开源扫描工具整合到统一的管理平台中，
 - Runs Lighthouse audits for performance, SEO, accessibility, and best practices.
 - Runs Pa11y WCAG checks with selectors, HTML evidence, and practical remediation guidance.
 - Detects broken links and keeps a page inventory.
+- Searches the selected website's crawled pages and opens an internal Page Inspector with status, findings, selectors, and HTML evidence.
 - Tracks findings through open, assigned, in-progress, resolved, ignored, and reopened states.
 - Schedules long-running scans with Celery and Redis instead of blocking web requests.
 - Stores websites, scan jobs, crawl data, and issue history in PostgreSQL.
@@ -200,6 +201,7 @@ OpenAudit already covers the core accessibility, SEO, performance, page inventor
 - 使用 Lighthouse 检查性能、SEO、无障碍和最佳实践。
 - 使用 Pa11y 执行 WCAG 检查，并提供选择器、HTML 证据和可执行的修复建议。
 - 检测死链并维护完整的页面清单。
+- 搜索当前网站已爬取的页面，并在内部 Page Inspector 中查看状态、问题、选择器和 HTML 证据。
 - 管理问题的开放、已分配、处理中、已解决、忽略和重新打开状态。
 - 通过 Celery 和 Redis 在后台执行耗时扫描，避免网页请求卡死。
 - 使用 PostgreSQL 保存网站、扫描任务、页面和问题历史。
