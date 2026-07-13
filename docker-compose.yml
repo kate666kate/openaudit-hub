@@ -1,4 +1,13 @@
 services:
+  demo:
+    image: nginx:alpine
+    container_name: openaudit-demo
+    restart: unless-stopped
+    ports:
+      - "8095:80"
+    volumes:
+      - ../openaudit-hub-demo:/usr/share/nginx/html:ro
+
   portal:
     build:
       context: ./services/portal
