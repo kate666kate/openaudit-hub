@@ -51,7 +51,7 @@ class PortalTests(unittest.TestCase):
             app_module.validated_scan_type("unknown-tool")
 
     def test_main_operational_pages_render(self) -> None:
-        for path in ("/", "/websites", "/scans", "/modules/issues", "/modules/activity-plans", "/modules/content-optimization", "/modules/duplicate-content", "/modules/keyword-suggestions", "/modules/performance-budgets", "/modules/robots-indexing", "/modules/structured-data", "/modules/security-headers", "/modules/sitemaps"):
+        for path in ("/", "/websites", "/scans", "/modules/issues", "/modules/activity-plans", "/modules/content-optimization", "/modules/duplicate-content", "/modules/keyword-suggestions", "/modules/performance-budgets", "/modules/robots-indexing", "/modules/structured-data", "/modules/security-headers", "/modules/sitemaps", "/modules/ecommerce-readiness", "/modules/conversion-tracking"):
             with self.subTest(path=path):
                 self.assertEqual(self.client.get(path).status_code, 200)
 
@@ -215,6 +215,62 @@ class PortalTests(unittest.TestCase):
         response = self.client.get(f"/api/crawl-pages?site={website['key']}")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()[0]["title"], "Services")
+
+    def test_ecommerce_readiness_maps_shopify_pages_to_operations(self) -> None:
+        website = database.ensure_website("https://coffee.example.com", "Coffee shop")
+        database.replace_crawl_pages(website["key"], [
+            {
+                "url": "https://coffee.example.com/products/espresso-blend",
+                "title": "Espresso Blend",
+                "meta_description": "",
+                "word_count": 90,
+                "h1_count": 1,
+                "status_code": 200,
+                "depth": 1,
+                "source": "sitemap",
+                "content_type": "text/html",
+                "technical_data": {"structured_data_types": [], "open_graph": {}},
+            },
+            {
+                "url": "https://coffee.example.com/collections/coffee-beans",
+                "title": "Coffee Beans",
+                "meta_description": "Shop coffee beans.",
+                "word_count": 220,
+                "h1_count": 1,
+                "status_code": 200,
+                "depth": 1,
+                "source": "sitemap",
+                "content_type": "text/html",
+                "technical_data": {"structured_data_types": ["CollectionPage"], "open_graph": {"title": "Coffee Beans"}},
+            },
+            {
+                "url": "https://coffee.example.com/pages/coffee-subscription",
+                "title": "Coffee Subscription",
+                "meta_description": "Subscribe for recurring coffee delivery.",
+                "word_count": 300,
+                "h1_count": 1,
+                "status_code": 200,
+                "depth": 1,
+                "source": "internal-link",
+                "content_type": "text/html",
+            },
+        ])
+
+        summary = app_module.build_ecommerce_summary(database.list_crawl_pages(website["key"]), [])
+        self.assertEqual(summary["product_pages"], "1")
+        self.assertEqual(summary["collection_pages"], "1")
+        self.assertEqual(summary["subscription_pages"], "1")
+        self.assertTrue(any("Product schema" in item["finding"] for item in summary["opportunities"]))
+
+        html = self.client.get(f"/modules/ecommerce-readiness?site={website['key']}").get_data(as_text=True)
+        self.assertIn("Shopify Plus eCommerce operations", html)
+        self.assertIn("Product and CRO action queue", html)
+        self.assertIn("Espresso Blend", html)
+
+        tracking_html = self.client.get(f"/modules/conversion-tracking?site={website['key']}").get_data(as_text=True)
+        self.assertIn("GA4 / GTM event map", tracking_html)
+        self.assertIn("add_to_cart", tracking_html)
+        self.assertIn("subscribe", tracking_html)
 
     def test_page_inspector_shows_only_selected_website_evidence(self) -> None:
         website = database.ensure_website("https://inspector.example.com", "Inspector test")

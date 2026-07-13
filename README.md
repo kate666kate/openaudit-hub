@@ -142,6 +142,8 @@ For a short interview walkthrough, use [`docs/interview-demo-checklist.md`](docs
 | Content optimization | `http://localhost:9090/modules/content-optimization` |
 | Duplicate content | `http://localhost:9090/modules/duplicate-content` |
 | Keyword suggestions | `http://localhost:9090/modules/keyword-suggestions` |
+| Shopify readiness | `http://localhost:9090/modules/ecommerce-readiness` |
+| Conversion tracking | `http://localhost:9090/modules/conversion-tracking` |
 | Robots and indexing | `http://localhost:9090/modules/robots-indexing` |
 | Structured data | `http://localhost:9090/modules/structured-data` |
 | Security headers | `http://localhost:9090/modules/security-headers` |

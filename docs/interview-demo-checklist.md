@@ -16,9 +16,11 @@ Use this checklist when presenting OpenAudit Hub from a laptop.
 2. Open **Websites** and show how multiple sites can be managed from the registry.
 3. Open **Scans** and explain the scan types: Full, Accessibility, Content, and Lighthouse.
 4. Open **SEO Advanced > Keyword suggestions** and show the first recommended content edit.
-5. Open **Accessibility > Issues** and explain one issue using evidence, owner, and remediation steps.
-6. Open **Quality Assurance > Broken links** and show how broken URLs become an actionable fix list.
-7. Use the page search box to inspect a crawled page and show page-scoped findings.
+5. Open **eCommerce > Shopify readiness** and explain product pages, collections, subscriptions, promotions, and CRO actions.
+6. Open **eCommerce > Conversion tracking** and connect the event map to your GTM / GA4 screenshots.
+7. Open **Accessibility > Issues** and explain one issue using evidence, owner, and remediation steps.
+8. Open **Quality Assurance > Broken links** and show how broken URLs become an actionable fix list.
+9. Use the page search box to inspect a crawled page and show page-scoped findings.
 
 ## Short positioning line
 
@@ -27,6 +29,7 @@ OpenAudit Hub is an open-source website governance dashboard inspired by Siteimp
 ## How to connect it to ecommerce work
 
 - Shopify content and products: use the crawl inventory and content checks to find weak product pages, missing metadata, broken links, and thin content.
+- Shopify Plus operations: use the eCommerce readiness page to talk through day-to-day product listings, collections, seasonal launches, promotions, subscription programs, app/theme handoff, and QA.
 - CRO and analytics: use GA4/GTM to measure whether fixes improve add-to-cart, checkout, form submissions, phone calls, or quote requests.
 - Campaigns: use Search Console CSV and keyword recommendations to improve landing pages for real queries.
 - Team workflow: assign issues to content, SEO, development, or marketing owners and track them through resolution.

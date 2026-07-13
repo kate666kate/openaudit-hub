@@ -807,6 +807,7 @@ def portal_template_context(active_slug: str = "dashboard") -> dict[str, Any]:
         "content_optimization": content_optimization,
         "duplicate_content": duplicate_content,
         "technical_crawl": build_technical_crawl_summary(crawl_pages, managed_issues),
+        "ecommerce_summary": build_ecommerce_summary(crawl_pages, managed_issues),
         "budget_summary": build_budget_summary(selected_site, managed_issues, lighthouse_summary),
         "managed_issues": managed_issues,
         "content_governance": build_content_governance_summary(crawl_pages, managed_issues, selected_site_key),
@@ -881,6 +882,15 @@ def module_navigation(active_slug: str = "") -> list[dict[str, Any]]:
                 {"title": "Content quality", "slug": "content-quality"},
                 {"title": "Spelling and readability", "slug": "spelling-readability"},
                 {"title": "Documents and PDFs", "slug": "documents-pdfs"},
+            ],
+        },
+        {
+            "group": "eCommerce",
+            "slug": "ecommerce",
+            "badge": "Shopify",
+            "items": [
+                {"title": "Shopify readiness", "slug": "ecommerce-readiness"},
+                {"title": "Conversion tracking", "slug": "conversion-tracking"},
             ],
         },
         {
@@ -1360,6 +1370,223 @@ def enrich_duplicate_group(group: dict[str, Any], source_pages: list[dict[str, A
         "points": round(min(20.0, 2.5 + max(0, len(matched_pages) - 1) * 2.5), 1),
         "decision_note": "The suggested primary page has the most measured content; review traffic, backlinks, and conversions before redirecting anything.",
     }
+
+
+def build_ecommerce_summary(
+    crawl_pages: list[dict[str, Any]], issues: list[dict[str, Any]]
+) -> dict[str, Any]:
+    pages = content_inventory_pages(crawl_pages)
+    classified = []
+    type_counts: Counter[str] = Counter()
+    for page in pages:
+        page_type = classify_ecommerce_page(page)
+        type_counts[page_type] += 1
+        classified.append({**page, "ecommerce_type": page_type})
+
+    commerce_types = {"Product", "Collection", "Subscription", "Promotion", "Conversion path"}
+    commerce_pages = [page for page in classified if page["ecommerce_type"] in commerce_types]
+    opportunities = build_ecommerce_opportunities(commerce_pages or classified[:20], issues)
+    blocking = [item for item in opportunities if item["priority"] in {"High", "Medium"}]
+    score = max(0, min(100, 88 - len(blocking) * 6 - max(0, len(opportunities) - len(blocking)) * 2))
+    if not pages:
+        score = 0
+
+    return {
+        "status": "Ready" if pages else "Run crawl",
+        "score": str(score),
+        "total_pages": str(len(pages)),
+        "commerce_pages": str(len(commerce_pages)),
+        "product_pages": str(type_counts.get("Product", 0)),
+        "collection_pages": str(type_counts.get("Collection", 0)),
+        "subscription_pages": str(type_counts.get("Subscription", 0)),
+        "promotion_pages": str(type_counts.get("Promotion", 0)),
+        "conversion_pages": str(type_counts.get("Conversion path", 0)),
+        "opportunities": opportunities[:8],
+        "page_types": [
+            {"label": label, "count": str(type_counts.get(label, 0)), "detail": detail}
+            for label, detail in [
+                ("Product", "Product detail pages and Shopify product handles"),
+                ("Collection", "Collection, category and merchandising pages"),
+                ("Subscription", "Recurring order, coffee club or subscribe pages"),
+                ("Promotion", "Sale, bundle, offer and campaign landing pages"),
+                ("Conversion path", "Cart, checkout, account, quote and lead paths"),
+                ("Content assist", "Blogs, guides and advice pages that support product discovery"),
+            ]
+        ],
+        "operations": build_ecommerce_operations(type_counts, opportunities),
+        "tracking_events": build_conversion_tracking_events(type_counts),
+        "subscription_checks": build_subscription_checks(type_counts),
+    }
+
+
+def classify_ecommerce_page(page: dict[str, Any]) -> str:
+    url = str(page.get("url") or "").lower()
+    title = str(page.get("title") or "").lower()
+    path = urlparse(url).path.lower()
+    text = f"{path} {title}"
+    if any(token in text for token in ["checkout", "cart", "thank-you", "order", "account", "register", "login", "quote", "contact"]):
+        return "Conversion path"
+    if any(token in text for token in ["subscription", "subscribe", "coffee-club", "recurring", "recharge"]):
+        return "Subscription"
+    if any(token in path for token in ["/products/", "/product/", "/p/"]):
+        return "Product"
+    if any(token in path for token in ["/collections/", "/collection/", "/categories/", "/category/", "/shop/"]):
+        return "Collection"
+    if any(token in text for token in ["sale", "promotion", "promo", "offer", "discount", "bundle", "clearance", "campaign"]):
+        return "Promotion"
+    if any(token in path for token in ["/blog", "/blogs", "/guide", "/guides", "/learn", "/news"]):
+        return "Content assist"
+    return "Other"
+
+
+def build_ecommerce_opportunities(
+    pages: list[dict[str, Any]], issues: list[dict[str, Any]]
+) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    for page in pages:
+        url = str(page.get("url") or "")
+        if not url:
+            continue
+        page_type = str(page.get("ecommerce_type") or classify_ecommerce_page(page))
+        title = str(page.get("title") or "Untitled page").strip() or "Untitled page"
+        meta = str(page.get("meta_description") or "").strip()
+        word_count = safe_int(page.get("word_count"))
+        h1_count = safe_int(page.get("h1_count"))
+        status_code = safe_int(page.get("status_code"))
+        technical = page.get("technical_data") if isinstance(page.get("technical_data"), dict) else {}
+        schema_types = {str(value).lower() for value in technical.get("structured_data_types", [])}
+        open_graph = technical.get("open_graph") if isinstance(technical.get("open_graph"), dict) else {}
+        page_issues = [issue for issue in issues if issue_matches_page(url, normalize_issue_detail(issue) or issue)]
+        findings: list[str] = []
+        if status_code >= 400:
+            findings.append(f"Page returns HTTP {status_code}")
+        if not meta:
+            findings.append("Missing meta description")
+        elif len(meta) < 70:
+            findings.append("Meta description is too short")
+        if h1_count == 0:
+            findings.append("Missing H1")
+        elif h1_count > 1:
+            findings.append("Multiple H1 headings")
+        if page_type in {"Product", "Collection"} and 0 < word_count < 150:
+            findings.append("Thin commercial copy")
+        if page_type == "Product" and "product" not in schema_types:
+            findings.append("Product schema not detected")
+        if page_type in {"Product", "Collection", "Promotion"} and not (open_graph.get("title") and open_graph.get("description")):
+            findings.append("Social preview metadata incomplete")
+        if page_issues:
+            findings.append(f"{len(page_issues)} audit finding(s) attached")
+        if not findings:
+            continue
+
+        priority = "High" if status_code >= 400 or len(findings) >= 4 else "Medium" if len(findings) >= 2 else "Quick win"
+        rows.append(
+            {
+                "page": url,
+                "title": title,
+                "type": page_type,
+                "priority": priority,
+                "owner": ecommerce_owner(page_type, findings),
+                "finding": "; ".join(findings[:3]),
+                "action": ecommerce_action(page_type, findings),
+                "metric": ecommerce_metric(page_type),
+            }
+        )
+    priority_order = {"High": 0, "Medium": 1, "Quick win": 2}
+    return sorted(rows, key=lambda row: (priority_order.get(row["priority"], 9), row["type"], row["page"]))
+
+
+def ecommerce_owner(page_type: str, findings: list[str]) -> str:
+    joined = " ".join(findings).lower()
+    if "http" in joined or "schema" in joined or "social preview" in joined:
+        return "Development / Shopify theme"
+    if page_type in {"Product", "Collection"}:
+        return "Merchandising / eCommerce"
+    if page_type in {"Promotion", "Subscription"}:
+        return "Marketing"
+    return "eCommerce"
+
+
+def ecommerce_action(page_type: str, findings: list[str]) -> str:
+    joined = " ".join(findings).lower()
+    if "http" in joined:
+        return "Restore the page, update navigation/product links, or create a relevant 301 redirect."
+    if "schema" in joined:
+        return "Check the Shopify product template and make sure Product JSON-LD is emitted correctly."
+    if page_type == "Product":
+        return "Improve product title, benefits, specifications, image alt text, schema, and internal links."
+    if page_type == "Collection":
+        return "Add collection intro copy, filters/merchandising context, internal links, and unique metadata."
+    if page_type == "Subscription":
+        return "Clarify subscribe-and-save value, frequency, cancellation, retention offer, and tracking events."
+    if page_type == "Promotion":
+        return "Check campaign landing copy, offer clarity, UTM consistency, expiry messaging, and conversion CTA."
+    return "Review the page in Shopify/admin workflow and fix the highest-impact metadata or UX issue."
+
+
+def ecommerce_metric(page_type: str) -> str:
+    return {
+        "Product": "Product views, add_to_cart rate, conversion rate",
+        "Collection": "Collection CTR, product clicks, add_to_cart rate",
+        "Subscription": "Subscription starts, retention, lifetime value",
+        "Promotion": "Campaign conversion rate, revenue, bounce rate",
+        "Conversion path": "Checkout progression and form completion",
+    }.get(page_type, "Engagement and assisted conversion")
+
+
+def build_ecommerce_operations(
+    type_counts: Counter[str], opportunities: list[dict[str, str]]
+) -> list[dict[str, str]]:
+    high_count = sum(1 for item in opportunities if item["priority"] == "High")
+    return [
+        {
+            "name": "Product management",
+            "status": "Ready" if type_counts.get("Product") else "Needs product crawl",
+            "detail": f"{type_counts.get('Product', 0)} product page(s) detected; review metadata, copy, schema and images.",
+        },
+        {
+            "name": "Collections and merchandising",
+            "status": "Ready" if type_counts.get("Collection") else "Needs collection URLs",
+            "detail": f"{type_counts.get('Collection', 0)} collection page(s) detected; check filters, copy, internal links and seasonal ranges.",
+        },
+        {
+            "name": "Subscriptions",
+            "status": "Review" if type_counts.get("Subscription") else "Plan needed",
+            "detail": "Use subscription landing pages and product options to explain value, frequency, cancellation and retention messaging.",
+        },
+        {
+            "name": "Campaign and promotions",
+            "status": "Review" if type_counts.get("Promotion") else "Plan needed",
+            "detail": "Use promotion pages with UTM tracking, offer clarity, expiry messaging and conversion checks.",
+        },
+        {
+            "name": "CRO action queue",
+            "status": "Needs fixes" if high_count else "Ready",
+            "detail": f"{len(opportunities)} eCommerce opportunity item(s), including {high_count} high-priority blocker(s).",
+        },
+    ]
+
+
+def build_conversion_tracking_events(type_counts: Counter[str]) -> list[dict[str, str]]:
+    return [
+        {"event": "view_item", "where": "Product pages", "status": "Validate in GTM" if type_counts.get("Product") else "Needs product pages", "why": "Measures product detail engagement before add to cart."},
+        {"event": "add_to_cart", "where": "Product cards and PDP CTA", "status": "Validate in GTM", "why": "Core ecommerce intent signal for CRO and Google Ads."},
+        {"event": "begin_checkout", "where": "Cart or checkout entry", "status": "Validate in GTM" if type_counts.get("Conversion path") else "Map checkout path", "why": "Shows whether cart users progress into checkout."},
+        {"event": "purchase", "where": "Order confirmation page", "status": "Protect before publishing", "why": "Primary revenue conversion used by GA4 and Google Ads."},
+        {"event": "generate_lead", "where": "Contact, quote or phone CTA", "status": "Validate in GTM" if type_counts.get("Conversion path") else "Optional", "why": "Useful for quote forms, phone calls and B2B ecommerce paths."},
+        {"event": "sign_up", "where": "Newsletter and account registration", "status": "Validate in GTM", "why": "Measures list growth, account creation and lifecycle marketing entry."},
+        {"event": "subscribe", "where": "Subscription program CTA", "status": "Plan event" if not type_counts.get("Subscription") else "Validate in GTM", "why": "Connects subscription acquisition to retention and lifetime value."},
+    ]
+
+
+def build_subscription_checks(type_counts: Counter[str]) -> list[dict[str, str]]:
+    has_subscription = bool(type_counts.get("Subscription"))
+    return [
+        {"check": "Subscription value proposition", "status": "Review" if has_subscription else "Not detected", "detail": "Explain savings, frequency, flexibility, cancellation and delivery promise."},
+        {"check": "Lifecycle tracking", "status": "Plan", "detail": "Track subscription start, skip, pause, cancel and repeat purchase events."},
+        {"check": "Retention content", "status": "Plan", "detail": "Add FAQ, brewing/use guidance, replenishment reminders and win-back messaging."},
+        {"check": "App governance", "status": "Manual review", "detail": "Check Shopify subscription app settings, checkout compatibility and customer-service handoff."},
+    ]
 
 
 def near_duplicate_body_groups(

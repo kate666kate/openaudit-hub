@@ -5241,6 +5241,12 @@ a:hover {
 .si-status-partial,
 .si-status-on-demand,
 .si-status-planned,
+.si-status-plan,
+.si-status-plan-needed,
+.si-status-manual-review,
+.si-status-validate-in-gtm,
+.si-status-protect-before-publishing,
+.si-status-map-checkout-path,
 .si-status-setup-needed,
 .si-status-available-after-mautic-setup,
 .si-status-pair-with-matomo,
@@ -5283,6 +5289,9 @@ a:hover {
 .si-status-setup,
 .si-status-offline,
 .si-status-needs-review,
+.si-status-needs-product-crawl,
+.si-status-needs-collection-urls,
+.si-status-needs-product-pages,
 .si-status-needs-fixes {
   color: #851d14;
   background: #ffe5e1;
@@ -5372,6 +5381,107 @@ a:hover {
   margin: 0;
   color: #667085;
   line-height: 1.5;
+}
+
+.si-ecommerce-hero {
+  overflow: hidden;
+}
+
+.si-ecommerce-scoreboard {
+  display: grid;
+  grid-template-columns: 1.15fr repeat(4, minmax(130px, 1fr));
+  border-top: 1px solid #e5e8eb;
+}
+
+.si-ecommerce-scoreboard article {
+  min-width: 0;
+  padding: 20px;
+  border-right: 1px solid #e5e8eb;
+  background: #fff;
+}
+
+.si-ecommerce-scoreboard article:first-child {
+  color: #fff;
+  background: linear-gradient(135deg, #0b1f4d 0%, #1555d8 100%);
+}
+
+.si-ecommerce-scoreboard article:last-child {
+  border-right: 0;
+}
+
+.si-ecommerce-scoreboard span,
+.si-ecommerce-type-grid span {
+  display: block;
+  color: inherit;
+  font-size: 0.76rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.si-ecommerce-scoreboard strong {
+  display: block;
+  margin: 8px 0 6px;
+  color: #102033;
+  font-size: 2rem;
+}
+
+.si-ecommerce-scoreboard article:first-child strong {
+  color: #fff;
+}
+
+.si-ecommerce-scoreboard small {
+  font-size: 0.92rem;
+}
+
+.si-ecommerce-scoreboard p,
+.si-ecommerce-type-grid p {
+  margin: 0;
+  color: #667085;
+  line-height: 1.45;
+}
+
+.si-ecommerce-scoreboard article:first-child p {
+  color: #dbe8ff;
+}
+
+.si-ecommerce-ops > article {
+  min-height: 150px;
+}
+
+.si-ecommerce-table .si-analytics-row {
+  grid-template-columns: minmax(260px, 0.9fr) minmax(140px, 0.45fr) minmax(260px, 1fr) minmax(190px, 0.65fr);
+  align-items: start;
+}
+
+.si-ecommerce-table span small {
+  display: block;
+  margin-top: 6px;
+  color: #667085;
+  font-size: 0.75rem;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
+.si-ecommerce-type-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 1px;
+  padding: 1px;
+  background: #e5e8eb;
+}
+
+.si-ecommerce-type-grid article {
+  min-height: 150px;
+  padding: 18px;
+  background: #fff;
+}
+
+.si-ecommerce-type-grid strong {
+  display: block;
+  margin-bottom: 10px;
+  color: #1555d8;
+  font-size: 2rem;
 }
 
 .si-sitemap-empty {
@@ -7475,6 +7585,8 @@ a:hover {
   .si-activity-item,
   .si-activity-update,
   .si-content-scoreboard,
+  .si-ecommerce-scoreboard,
+  .si-ecommerce-type-grid,
   .si-content-page-head,
   .si-content-fix-list,
   .si-keyword-workflow,

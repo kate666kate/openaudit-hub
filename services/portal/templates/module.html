@@ -1179,6 +1179,137 @@
           </div>
         </section>
 
+        {% elif page.slug == "ecommerce-readiness" %}
+        {% set commerce = ecommerce_summary %}
+        <section class="si-wide-card si-ecommerce-hero">
+          <div class="si-card-head">
+            <div>
+              <h2>Shopify Plus eCommerce operations</h2>
+              <span>Translate scan results into product, collection, subscription, promotion and CRO work</span>
+            </div>
+            <span class="si-status si-status-{{ commerce.status|lower|replace(' ', '-') }}">{{ commerce.status }}</span>
+          </div>
+          <div class="si-ecommerce-scoreboard">
+            <article><span>eCommerce readiness</span><strong>{{ commerce.score }}<small>/100</small></strong><p>Operational demo score from crawl, content and issue signals</p></article>
+            <article><span>Commerce pages</span><strong>{{ commerce.commerce_pages }}</strong><p>{{ commerce.total_pages }} total crawled HTML page(s)</p></article>
+            <article><span>Products</span><strong>{{ commerce.product_pages }}</strong><p>Product detail pages to manage and optimize</p></article>
+            <article><span>Collections</span><strong>{{ commerce.collection_pages }}</strong><p>Merchandising and seasonal launch pages</p></article>
+            <article><span>Subscriptions</span><strong>{{ commerce.subscription_pages }}</strong><p>Coffee club or recurring purchase journeys</p></article>
+          </div>
+        </section>
+
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>Shopify operations map</h2>
+            <span>Use this when explaining day-to-day platform ownership</span>
+          </div>
+          <div class="si-module-grid si-ecommerce-ops">
+            {% for item in commerce.operations %}
+            <article>
+              <h3>{{ item.name }}</h3>
+              <p>{{ item.detail }}</p>
+              <span class="si-status si-status-{{ item.status|lower|replace(' ', '-') }}">{{ item.status }}</span>
+            </article>
+            {% endfor %}
+          </div>
+        </section>
+
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>Product and CRO action queue</h2>
+            <span>Prioritized work you can hand to eCommerce, marketing, content or development</span>
+          </div>
+          {% if commerce.opportunities %}
+          <div class="si-analytics-table si-ecommerce-table">
+            <div class="si-analytics-row si-analytics-head">
+              <span>Page</span><span>Type / priority</span><span>Recommended action</span><span>Metric to watch</span>
+            </div>
+            {% for item in commerce.opportunities %}
+            <div class="si-analytics-row">
+              <strong><a href="{{ item.page }}" target="_blank" rel="noreferrer">{{ item.title }}</a><small>{{ item.page }}</small></strong>
+              <span>{{ item.type }}<small class="priority-{{ item.priority }}">{{ item.priority }}</small></span>
+              <span>{{ item.action }}<small>Owner: {{ item.owner }} &middot; {{ item.finding }}</small></span>
+              <span>{{ item.metric }}</span>
+            </div>
+            {% endfor %}
+          </div>
+          {% else %}
+          <div class="si-activity-empty"><strong>No eCommerce opportunities found yet</strong><p>Run a Content or Full scan against product, collection and conversion pages to populate this queue.</p></div>
+          {% endif %}
+        </section>
+
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>Page type coverage</h2>
+            <span>Shows whether the crawl includes the parts of a Shopify Plus store you would normally manage</span>
+          </div>
+          <div class="si-ecommerce-type-grid">
+            {% for item in commerce.page_types %}
+            <article>
+              <strong>{{ item.count }}</strong>
+              <span>{{ item.label }}</span>
+              <p>{{ item.detail }}</p>
+            </article>
+            {% endfor %}
+          </div>
+        </section>
+
+        {% elif page.slug == "conversion-tracking" %}
+        {% set commerce = ecommerce_summary %}
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <div>
+              <h2>Conversion tracking</h2>
+              <span>GA4 / GTM event map for ecommerce performance reporting and CRO</span>
+            </div>
+            <a class="si-button-secondary" href="/modules/ecommerce-readiness{% if selected_site_key %}?site={{ selected_site_key }}{% endif %}">Open Shopify readiness</a>
+          </div>
+          <div class="si-connector-setup">
+            <div>
+              <h3>Use this with your GTM screenshots</h3>
+              <p>OpenAudit identifies page and quality problems. GTM and GA4 validate whether fixes improve add-to-cart, checkout, lead, phone, newsletter and subscription outcomes.</p>
+            </div>
+            <ol>
+              <li>Map each important ecommerce action to a GA4 event.</li>
+              <li>Test pending tags in GTM Preview / Tag Assistant before publishing.</li>
+              <li>Compare scan fixes with GA4 conversion and engagement changes.</li>
+            </ol>
+          </div>
+        </section>
+
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>Recommended event map</h2>
+            <span>Designed for Shopify Plus, subscriptions, promotions and quote/contact journeys</span>
+          </div>
+          <div class="si-analytics-table si-ecommerce-table">
+            <div class="si-analytics-row si-analytics-head">
+              <span>GA4 event</span><span>Where it fires</span><span>Status</span><span>Why it matters</span>
+            </div>
+            {% for event in commerce.tracking_events %}
+            <div class="si-analytics-row">
+              <strong>{{ event.event }}</strong><span>{{ event.where }}</span><span>{{ event.status }}</span><span>{{ event.why }}</span>
+            </div>
+            {% endfor %}
+          </div>
+        </section>
+
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>Subscription program checks</h2>
+            <span>Useful for coffee, consumables, repeat purchase and lifetime-value conversations</span>
+          </div>
+          <div class="si-module-grid">
+            {% for check in commerce.subscription_checks %}
+            <article>
+              <h3>{{ check.check }}</h3>
+              <p>{{ check.detail }}</p>
+              <span class="si-status si-status-{{ check.status|lower|replace(' ', '-') }}">{{ check.status }}</span>
+            </article>
+            {% endfor %}
+          </div>
+        </section>
+
         {% elif page.slug == "pages" %}
         <section class="si-wide-card">
           <div class="si-card-head">
