@@ -84,11 +84,14 @@
     const container = document.querySelector(".si-page-search[data-site]");
     if (!container) return;
     const input = container.querySelector("input");
+    const searchButton = container.querySelector(".si-page-search-submit");
     const results = container.querySelector(".si-page-search-results");
     const site = container.dataset.site;
     if (!input || !results || !site) return;
 
     let pages = [];
+    let matches = [];
+    let activeIndex = -1;
     let loaded = false;
     let loading = null;
     const loadPages = () => {
@@ -110,6 +113,34 @@
     const close = () => {
       results.hidden = true;
       input.setAttribute("aria-expanded", "false");
+      activeIndex = -1;
+    };
+    const activate = (index) => {
+      const options = [...results.querySelectorAll("a")];
+      options.forEach((option, optionIndex) => option.classList.toggle("active", optionIndex === index));
+      activeIndex = index;
+      if (options[index]) options[index].scrollIntoView({ block: "nearest" });
+    };
+    const openMatch = (index = activeIndex) => {
+      const target = matches[Math.max(index, 0)];
+      if (target?.url) {
+        window.location.href = `/pages/inspect?site=${encodeURIComponent(site)}&url=${encodeURIComponent(target.url)}`;
+        return true;
+      }
+      const firstLink = results.querySelector("a");
+      if (firstLink) {
+        window.location.href = firstLink.href;
+        return true;
+      }
+      return false;
+    };
+    const updateMatches = (query) => {
+      const terms = query.split(" ");
+      matches = pages.filter((page) => {
+        const haystack = normalize(`${page.title || ""} ${page.url || ""}`);
+        return terms.every((term) => haystack.includes(term));
+      }).slice(0, 8);
+      return matches;
     };
     const render = () => {
       const query = normalize(input.value);
@@ -118,14 +149,11 @@
       results.hidden = false;
       input.setAttribute("aria-expanded", "true");
       loadPages().then(() => {
-        const terms = query.split(" ");
-        const matches = pages.filter((page) => {
-          const haystack = normalize(`${page.title || ""} ${page.url || ""}`);
-          return terms.every((term) => haystack.includes(term));
-        }).slice(0, 8);
+        updateMatches(query);
         results.innerHTML = matches.length
           ? matches.map((page) => `<a role="option" href="/pages/inspect?site=${encodeURIComponent(site)}&url=${encodeURIComponent(page.url)}"><strong>${escapeHtml(page.title || "Untitled page")}</strong><span>${escapeHtml(page.url)}</span><em class="status-${Number(page.status_code) >= 400 ? "bad" : "good"}">${escapeHtml(page.status_code || "-")}</em></a>`).join("")
           : '<p class="si-search-empty">No crawled pages match this search</p>';
+        activeIndex = -1;
       }).catch(() => {
         results.innerHTML = '<p class="si-search-empty">Could not load the page inventory</p>';
       });
@@ -137,7 +165,40 @@
       if (event.key === "Escape") {
         input.value = "";
         close();
+        return;
       }
+      if (!matches.length || results.hidden) return;
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        activate((activeIndex + 1) % matches.length);
+      } else if (event.key === "ArrowUp") {
+        event.preventDefault();
+        activate((activeIndex - 1 + matches.length) % matches.length);
+      } else if (event.key === "Enter") {
+        event.preventDefault();
+        openMatch();
+      }
+    });
+    if (searchButton) {
+      searchButton.addEventListener("click", () => {
+        if (openMatch()) return;
+        const query = normalize(input.value);
+        if (query.length < 2) {
+          input.focus();
+          return;
+        }
+        results.innerHTML = '<p class="si-search-empty">Searching page inventory...</p>';
+        results.hidden = false;
+        loadPages().then(() => {
+          updateMatches(query);
+          if (!openMatch()) render();
+        }).catch(() => {
+          results.innerHTML = '<p class="si-search-empty">Could not load the page inventory</p>';
+        });
+      });
+    }
+    container.addEventListener("submit", (event) => {
+      event.preventDefault();
     });
     document.addEventListener("click", (event) => {
       if (!event.target.closest(".si-page-search")) close();

@@ -38,7 +38,7 @@
           </div>
           <div class="si-page-search" data-site="{{ selected_site_key }}">
             <input type="search" placeholder="Search crawled pages" aria-label="Search crawled pages" aria-controls="si-page-search-results" autocomplete="off" {% if not selected_site_key %}disabled{% endif %}>
-            <span aria-hidden="true">Search</span>
+            <button class="si-page-search-submit" type="button" {% if not selected_site_key %}disabled{% endif %}>Search</button>
             <div id="si-page-search-results" class="si-search-results si-page-search-results" role="listbox" aria-label="Crawled page results" hidden></div>
           </div>
         </section>

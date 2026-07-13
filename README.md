@@ -128,6 +128,8 @@ The worker discovers sitemap and internal pages, stores the page inventory, runs
 
 ### Reports and operational views
 
+For a short interview walkthrough, use [`docs/interview-demo-checklist.md`](docs/interview-demo-checklist.md).
+
 | View | URL |
 | --- | --- |
 | Dashboard | `http://localhost:9090/` |

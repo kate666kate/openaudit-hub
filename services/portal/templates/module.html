@@ -39,7 +39,7 @@
           </div>
           <div class="si-page-search" data-site="{{ selected_site_key }}">
             <input type="search" placeholder="Search crawled pages" aria-label="Search crawled pages" aria-controls="si-page-search-results" autocomplete="off" {% if not selected_site_key %}disabled{% endif %}>
-            <span aria-hidden="true">Search</span>
+            <button class="si-page-search-submit" type="button" {% if not selected_site_key %}disabled{% endif %}>Search</button>
             <div id="si-page-search-results" class="si-search-results si-page-search-results" role="listbox" aria-label="Crawled page results" hidden></div>
           </div>
         </section>
@@ -1100,11 +1100,21 @@
           <div class="si-card-head si-subsection-head"><h3>Discovered page sample</h3><span>Use these pages as scan targets and spot-check sitemap coverage</span></div>
           <div class="si-analytics-table">
             <div class="si-analytics-row si-analytics-head">
-              <span>Discovered URL</span><span>Last modified</span><span>Source / frequency</span><span>Priority</span>
+              <span>Discovered URL</span><span>Last modified</span><span>Source / frequency</span><span>Actions</span>
             </div>
             {% for page_item in lighthouse.crawler_summary.sitemaps.sample_pages %}
-            <div class="si-analytics-row">
-              <strong>{{ page_item.loc }}</strong><span>{{ page_item.lastmod or "-" }}</span><span>{{ page_item.changefreq or "-" }}</span><span>{{ page_item.priority or "-" }}</span>
+            <div class="si-analytics-row si-url-action-row">
+              <strong>
+                <a href="{{ page_item.loc }}" target="_blank" rel="noreferrer">{{ page_item.loc }}</a>
+                <small>{% if page_item.priority %}Priority {{ page_item.priority }}{% else %}Use as a scan target{% endif %}</small>
+              </strong>
+              <span>{{ page_item.lastmod or "-" }}</span>
+              <span>{{ page_item.changefreq or "-" }}</span>
+              <span class="si-row-actions">
+                <a class="si-mini-button" href="/pages/inspect?site={{ selected_site_key }}&url={{ page_item.loc|urlencode }}">Inspect</a>
+                <a class="si-mini-button" href="{{ page_item.loc }}" target="_blank" rel="noreferrer">Open</a>
+                <button class="si-mini-button" type="button" data-copy-text="{{ page_item.loc|e }}">Copy URL</button>
+              </span>
             </div>
             {% endfor %}
           </div>
@@ -1295,12 +1305,13 @@
               <span>{{ finding.status }}</span>
               <span>{{ finding.severity }}</span>
               <span class="si-row-actions">
-                <a class="si-mini-button" href="{{ finding.url }}" target="_blank" rel="noreferrer">Open</a>
                 <a class="si-mini-button" href="/pages/inspect?site={{ selected_site_key }}&url={{ finding.url|urlencode }}">Inspect</a>
+                <a class="si-mini-button" href="{{ finding.url }}" target="_blank" rel="noreferrer">Open</a>
                 <button class="si-mini-button" type="button" data-copy-text="{{ finding.url|e }}">Copy URL</button>
+                <button class="si-mini-button" type="button" data-copy-text="{{ finding.fix_steps|join('\n')|e }}">Copy fix steps</button>
               </span>
               <details class="si-link-fix-details">
-                <summary>How to fix this</summary>
+                <summary>How to fix this broken URL</summary>
                 <ol>
                   {% for step in finding.fix_steps %}
                   <li>{{ step }}</li>

@@ -60,6 +60,7 @@ class PortalTests(unittest.TestCase):
         html = response.get_data(as_text=True)
         self.assertIn('id="si-menu-search" type="search"', html)
         self.assertIn('placeholder="Search tools and pages"', html)
+        self.assertIn("si-page-search-submit", html)
         self.assertIn('<script src="/static/app.js" defer></script>', html)
 
     def test_navigation_has_accessible_responsive_drawer(self) -> None:
@@ -176,7 +177,8 @@ class PortalTests(unittest.TestCase):
         self.assertIn('href="https://clicklinks.example.com/missing"', html)
         self.assertIn(">Inspect</a>", html)
         self.assertIn("data-copy-text=\"https://clicklinks.example.com/missing\"", html)
-        self.assertIn("How to fix this", html)
+        self.assertIn("Copy fix steps", html)
+        self.assertIn("How to fix this broken URL", html)
 
     def test_dashboard_shows_operations_center(self) -> None:
         response = self.client.get("/")
