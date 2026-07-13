@@ -5243,6 +5243,8 @@ a:hover {
 .si-status-planned,
 .si-status-plan,
 .si-status-plan-needed,
+.si-status-review,
+.si-status-manual-test,
 .si-status-manual-review,
 .si-status-validate-in-gtm,
 .si-status-protect-before-publishing,
@@ -5289,6 +5291,8 @@ a:hover {
 .si-status-setup,
 .si-status-offline,
 .si-status-needs-review,
+.si-status-needs-crawl,
+.si-status-run-crawl,
 .si-status-needs-product-crawl,
 .si-status-needs-collection-urls,
 .si-status-needs-product-pages,
@@ -5482,6 +5486,110 @@ a:hover {
   margin-bottom: 10px;
   color: #1555d8;
   font-size: 2rem;
+}
+
+.si-wordpress-hero .si-card-head {
+  border-bottom: 0;
+}
+
+.si-wordpress-scoreboard article:first-child {
+  background: linear-gradient(135deg, #101b35 0%, #1f6feb 100%);
+}
+
+.si-wordpress-scoreboard article:nth-child(3) strong {
+  color: #b42318;
+}
+
+.si-wordpress-scoreboard article:nth-child(4) strong {
+  color: #0b7786;
+}
+
+.si-wordpress-scoreboard article:nth-child(5) strong {
+  color: #7a4ad8;
+}
+
+.si-wordpress-checks > article,
+.si-wordpress-handover > article {
+  min-height: 150px;
+}
+
+.si-wordpress-table .si-analytics-row {
+  grid-template-columns: minmax(280px, 0.9fr) minmax(150px, 0.45fr) minmax(220px, 0.6fr) minmax(300px, 1fr);
+  align-items: start;
+}
+
+.si-wordpress-table span small {
+  display: block;
+  margin-top: 6px;
+  color: #667085;
+  font-size: 0.75rem;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
+.si-wordpress-type-grid strong {
+  color: #1f6feb;
+}
+
+.si-wordpress-step-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  padding: 22px;
+}
+
+.si-wordpress-step-list article {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+  padding: 16px;
+  border: 1px solid #dbe2ea;
+  background: #fff;
+}
+
+.si-wordpress-step-list article > span {
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  color: #fff;
+  background: #1f6feb;
+  font-weight: 900;
+}
+
+.si-wordpress-step-list h3,
+.si-wordpress-risk-grid strong {
+  margin: 0 0 6px;
+}
+
+.si-wordpress-step-list p,
+.si-wordpress-risk-grid p {
+  margin: 0;
+  color: #536174;
+  line-height: 1.5;
+}
+
+.si-wordpress-risk-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  padding: 1px;
+  background: #dbe2ea;
+}
+
+.si-wordpress-risk-grid article {
+  padding: 18px;
+  background: #fff;
+}
+
+.si-wordpress-risk-grid article:nth-child(2) {
+  box-shadow: inset 4px 0 0 #f97316;
+}
+
+.si-wordpress-risk-grid article:nth-child(3) {
+  box-shadow: inset 4px 0 0 #1f6feb;
 }
 
 .si-sitemap-empty {
@@ -7587,6 +7695,8 @@ a:hover {
   .si-content-scoreboard,
   .si-ecommerce-scoreboard,
   .si-ecommerce-type-grid,
+  .si-wordpress-step-list,
+  .si-wordpress-risk-grid,
   .si-content-page-head,
   .si-content-fix-list,
   .si-keyword-workflow,

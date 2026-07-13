@@ -51,7 +51,7 @@ class PortalTests(unittest.TestCase):
             app_module.validated_scan_type("unknown-tool")
 
     def test_main_operational_pages_render(self) -> None:
-        for path in ("/", "/websites", "/scans", "/modules/issues", "/modules/activity-plans", "/modules/content-optimization", "/modules/duplicate-content", "/modules/keyword-suggestions", "/modules/performance-budgets", "/modules/robots-indexing", "/modules/structured-data", "/modules/security-headers", "/modules/sitemaps", "/modules/ecommerce-readiness", "/modules/conversion-tracking"):
+        for path in ("/", "/websites", "/scans", "/modules/issues", "/modules/activity-plans", "/modules/content-optimization", "/modules/duplicate-content", "/modules/keyword-suggestions", "/modules/performance-budgets", "/modules/robots-indexing", "/modules/structured-data", "/modules/security-headers", "/modules/sitemaps", "/modules/ecommerce-readiness", "/modules/conversion-tracking", "/modules/wordpress-readiness", "/modules/wordpress-launch-checklist"):
             with self.subTest(path=path):
                 self.assertEqual(self.client.get(path).status_code, 200)
 
@@ -271,6 +271,72 @@ class PortalTests(unittest.TestCase):
         self.assertIn("GA4 / GTM event map", tracking_html)
         self.assertIn("add_to_cart", tracking_html)
         self.assertIn("subscribe", tracking_html)
+
+    def test_wordpress_readiness_maps_pages_to_launch_workflow(self) -> None:
+        website = database.ensure_website("https://wp.example.com", "WordPress test")
+        database.replace_crawl_pages(website["key"], [
+            {
+                "url": "https://wp.example.com/",
+                "title": "Home",
+                "meta_description": "",
+                "word_count": 120,
+                "h1_count": 1,
+                "status_code": 200,
+                "depth": 0,
+                "source": "homepage",
+                "content_type": "text/html",
+                "technical_data": {"indexable": True, "canonical": "https://wp.example.com/", "security_headers": {}},
+            },
+            {
+                "url": "https://wp.example.com/services/web-design",
+                "title": "Web Design Services",
+                "meta_description": "Web design services.",
+                "word_count": 90,
+                "h1_count": 0,
+                "status_code": 200,
+                "depth": 1,
+                "source": "sitemap",
+                "content_type": "text/html",
+            },
+            {
+                "url": "https://wp.example.com/contact",
+                "title": "Contact",
+                "meta_description": "Contact our team.",
+                "word_count": 200,
+                "h1_count": 1,
+                "status_code": 200,
+                "depth": 1,
+                "source": "internal-link",
+                "content_type": "text/html",
+            },
+            {
+                "url": "https://wp.example.com/shop/product/coffee",
+                "title": "Coffee Product",
+                "meta_description": "Coffee product.",
+                "word_count": 250,
+                "h1_count": 1,
+                "status_code": 200,
+                "depth": 2,
+                "source": "sitemap",
+                "content_type": "text/html",
+            },
+        ])
+
+        summary = app_module.build_wordpress_summary(database.list_crawl_pages(website["key"]), [])
+        self.assertEqual(summary["service_pages"], "1")
+        self.assertEqual(summary["forms_pages"], "1")
+        self.assertEqual(summary["commerce_pages"], "1")
+        self.assertTrue(any("SEO plugin fields" == check["name"] for check in summary["checks"]))
+        self.assertTrue(any("WordPress page editor" in item["where"] for item in summary["action_queue"]))
+
+        html = self.client.get(f"/modules/wordpress-readiness?site={website['key']}").get_data(as_text=True)
+        self.assertIn("WordPress operations readiness", html)
+        self.assertIn("Forms and SMTP", html)
+        self.assertIn("WordPress action queue", html)
+
+        checklist_html = self.client.get(f"/modules/wordpress-launch-checklist?site={website['key']}").get_data(as_text=True)
+        self.assertIn("WordPress launch checklist", checklist_html)
+        self.assertIn("Backup and handover", checklist_html)
 
     def test_page_inspector_shows_only_selected_website_evidence(self) -> None:
         website = database.ensure_website("https://inspector.example.com", "Inspector test")

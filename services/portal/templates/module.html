@@ -1310,6 +1310,149 @@
           </div>
         </section>
 
+        {% elif page.slug == "wordpress-readiness" %}
+        {% set wp = wordpress_summary %}
+        <section class="si-wide-card si-wordpress-hero">
+          <div class="si-card-head">
+            <div>
+              <h2>WordPress operations readiness</h2>
+              <span>Turn crawl data into WordPress admin, SEO plugin, forms, SSL and handover actions</span>
+            </div>
+            <span class="si-status si-status-{{ wp.status|lower|replace(' ', '-') }}">{{ wp.status }}</span>
+          </div>
+          <div class="si-ecommerce-scoreboard si-wordpress-scoreboard">
+            <article><span>Readiness score</span><strong>{{ wp.score }}<small>/100</small></strong><p>Demo score from crawl, content, technical and issue signals</p></article>
+            <article><span>Crawled pages</span><strong>{{ wp.total_pages }}</strong><p>WordPress pages detected in the selected website</p></article>
+            <article><span>Blockers</span><strong>{{ wp.blockers }}</strong><p>High-priority fixes before launch or handover</p></article>
+            <article><span>Forms / leads</span><strong>{{ wp.forms_pages }}</strong><p>Contact, quote, booking and enquiry paths</p></article>
+            <article><span>WooCommerce</span><strong>{{ wp.commerce_pages }}</strong><p>Shop, product, cart or checkout pages</p></article>
+          </div>
+        </section>
+
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>WordPress checklist map</h2>
+            <span>Use this to explain exactly where the work happens in WordPress, hosting or plugins</span>
+          </div>
+          <div class="si-module-grid si-wordpress-checks">
+            {% for check in wp.checks %}
+            <article>
+              <h3>{{ check.name }}</h3>
+              <p>{{ check.detail }}</p>
+              <span class="si-status si-status-{{ check.status|lower|replace(' ', '-') }}">{{ check.status }}</span>
+            </article>
+            {% endfor %}
+          </div>
+        </section>
+
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>WordPress action queue</h2>
+            <span>Prioritized fixes you can hand to content, SEO, website admin, developer or hosting owner</span>
+          </div>
+          {% if wp.action_queue %}
+          <div class="si-analytics-table si-wordpress-table">
+            <div class="si-analytics-row si-analytics-head">
+              <span>Page</span><span>Type / priority</span><span>Where to fix</span><span>What to change</span>
+            </div>
+            {% for item in wp.action_queue %}
+            <div class="si-analytics-row">
+              <strong><a href="{{ item.page }}" target="_blank" rel="noreferrer">{{ item.title }}</a><small>{{ item.page }}</small></strong>
+              <span>{{ item.type }}<small class="priority-{{ item.priority }}">{{ item.priority }} · {{ item.owner }}</small></span>
+              <span>{{ item.where }}</span>
+              <span>{{ item.action }}<small>{{ item.finding }}</small></span>
+            </div>
+            {% endfor %}
+          </div>
+          {% else %}
+          <div class="si-activity-empty"><strong>No WordPress action queue yet</strong><p>Run a Content or Full scan first. OpenAudit will map pages to SEO, forms, SSL, WooCommerce and handover checks.</p></div>
+          {% endif %}
+        </section>
+
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>Page type coverage</h2>
+            <span>Checks whether the crawl includes the parts of a WordPress site you usually maintain</span>
+          </div>
+          <div class="si-ecommerce-type-grid si-wordpress-type-grid">
+            {% for item in wp.page_types %}
+            <article>
+              <strong>{{ item.count }}</strong>
+              <span>{{ item.label }}</span>
+              <p>{{ item.detail }}</p>
+            </article>
+            {% endfor %}
+          </div>
+        </section>
+
+        {% elif page.slug == "wordpress-launch-checklist" %}
+        {% set wp = wordpress_summary %}
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <div>
+              <h2>WordPress launch checklist</h2>
+              <span>Access, backup, cPanel, DNS, SSL, forms, SEO, performance and handover</span>
+            </div>
+            <a class="si-button-secondary" href="/modules/wordpress-readiness{% if selected_site_key %}?site={{ selected_site_key }}{% endif %}">Open readiness</a>
+          </div>
+          <div class="si-connector-setup">
+            <div>
+              <h3>Safe way to use this module</h3>
+              <p>OpenAudit can diagnose from crawl data without WordPress login. Live admin, cPanel, DNS, database, plugin and theme changes should be confirmed before anyone edits production.</p>
+            </div>
+            <ol>
+              <li>Run a Content or Full scan to populate the page inventory.</li>
+              <li>Use the readiness page to decide what needs content, plugin, hosting or developer work.</li>
+              <li>Use this checklist before launch, migration, client handover or interview walkthrough.</li>
+            </ol>
+          </div>
+        </section>
+
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>Launch workflow</h2>
+            <span>Ordered steps for a practical WordPress / cPanel delivery conversation</span>
+          </div>
+          <div class="si-wordpress-step-list">
+            {% for item in wp.launch_steps %}
+            <article>
+              <span>{{ loop.index }}</span>
+              <div>
+                <h3>{{ item.step }}</h3>
+                <p>{{ item.detail }}</p>
+              </div>
+            </article>
+            {% endfor %}
+          </div>
+        </section>
+
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>Backup and handover notes</h2>
+            <span>Reusable structure for explaining what changed and what the client should verify</span>
+          </div>
+          <div class="si-module-grid si-wordpress-handover">
+            {% for item in wp.handover %}
+            <article>
+              <h3>{{ item.label }}</h3>
+              <p>{{ item.example }}</p>
+            </article>
+            {% endfor %}
+          </div>
+        </section>
+
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>Permission boundary</h2>
+            <span>Useful when explaining how you work safely with live websites</span>
+          </div>
+          <div class="si-wordpress-risk-grid">
+            <article><strong>Can usually prepare safely</strong><p>Audit notes, SEO title/meta drafts, alt text suggestions, form test plan, launch checklist and handover summary.</p></article>
+            <article><strong>Needs explicit approval</strong><p>DNS, MX/SPF/DKIM/DMARC, database import, plugin deactivation, theme change, production redirect and file deletion.</p></article>
+            <article><strong>Information needed</strong><p>Login URL, temporary admin access, 2FA status, hosting/cPanel access, allowed actions, not-allowed actions and rollback plan.</p></article>
+          </div>
+        </section>
+
         {% elif page.slug == "pages" %}
         <section class="si-wide-card">
           <div class="si-card-head">

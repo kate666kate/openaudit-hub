@@ -808,6 +808,7 @@ def portal_template_context(active_slug: str = "dashboard") -> dict[str, Any]:
         "duplicate_content": duplicate_content,
         "technical_crawl": build_technical_crawl_summary(crawl_pages, managed_issues),
         "ecommerce_summary": build_ecommerce_summary(crawl_pages, managed_issues),
+        "wordpress_summary": build_wordpress_summary(crawl_pages, managed_issues),
         "budget_summary": build_budget_summary(selected_site, managed_issues, lighthouse_summary),
         "managed_issues": managed_issues,
         "content_governance": build_content_governance_summary(crawl_pages, managed_issues, selected_site_key),
@@ -891,6 +892,15 @@ def module_navigation(active_slug: str = "") -> list[dict[str, Any]]:
             "items": [
                 {"title": "Shopify readiness", "slug": "ecommerce-readiness"},
                 {"title": "Conversion tracking", "slug": "conversion-tracking"},
+            ],
+        },
+        {
+            "group": "WordPress",
+            "slug": "wordpress",
+            "badge": "CMS",
+            "items": [
+                {"title": "WordPress readiness", "slug": "wordpress-readiness"},
+                {"title": "Launch checklist", "slug": "wordpress-launch-checklist"},
             ],
         },
         {
@@ -1586,6 +1596,206 @@ def build_subscription_checks(type_counts: Counter[str]) -> list[dict[str, str]]
         {"check": "Lifecycle tracking", "status": "Plan", "detail": "Track subscription start, skip, pause, cancel and repeat purchase events."},
         {"check": "Retention content", "status": "Plan", "detail": "Add FAQ, brewing/use guidance, replenishment reminders and win-back messaging."},
         {"check": "App governance", "status": "Manual review", "detail": "Check Shopify subscription app settings, checkout compatibility and customer-service handoff."},
+    ]
+
+
+def build_wordpress_summary(
+    crawl_pages: list[dict[str, Any]], issues: list[dict[str, Any]]
+) -> dict[str, Any]:
+    pages = content_inventory_pages(crawl_pages)
+    classified = []
+    type_counts: Counter[str] = Counter()
+    for page in pages:
+        page_type = classify_wordpress_page(page)
+        type_counts[page_type] += 1
+        classified.append({**page, "wordpress_type": page_type})
+
+    action_queue = build_wordpress_action_queue(classified, issues)
+    blocker_count = sum(1 for item in action_queue if item["priority"] == "High")
+    warning_count = sum(1 for item in action_queue if item["priority"] == "Medium")
+    score = max(0, min(100, 90 - blocker_count * 9 - warning_count * 4 - max(0, len(action_queue) - blocker_count - warning_count) * 1))
+    if not pages:
+        score = 0
+
+    return {
+        "status": "Ready" if pages else "Run crawl",
+        "score": str(score),
+        "total_pages": str(len(pages)),
+        "blockers": str(blocker_count),
+        "warnings": str(warning_count),
+        "content_pages": str(type_counts.get("Content page", 0)),
+        "blog_pages": str(type_counts.get("Blog / news", 0)),
+        "service_pages": str(type_counts.get("Service page", 0)),
+        "commerce_pages": str(type_counts.get("WooCommerce", 0)),
+        "forms_pages": str(type_counts.get("Forms / leads", 0)),
+        "page_types": [
+            {"label": label, "count": str(type_counts.get(label, 0)), "detail": detail}
+            for label, detail in [
+                ("Homepage", "Static homepage and top-level brand entry point"),
+                ("Content page", "Standard WordPress pages such as About, Services and FAQs"),
+                ("Service page", "Lead-generation service pages that need clear H1, CTA and metadata"),
+                ("Blog / news", "Posts, articles and content marketing pages"),
+                ("WooCommerce", "Product, shop, cart and checkout pages"),
+                ("Forms / leads", "Contact, enquiry, quote and booking paths"),
+            ]
+        ],
+        "checks": build_wordpress_checks(pages, action_queue),
+        "action_queue": action_queue[:10],
+        "launch_steps": build_wordpress_launch_steps(type_counts),
+        "handover": build_wordpress_handover_items(type_counts),
+    }
+
+
+def classify_wordpress_page(page: dict[str, Any]) -> str:
+    url = str(page.get("url") or "").lower()
+    title = str(page.get("title") or "").lower()
+    path = urlparse(url).path.lower().strip("/")
+    text = f"{path} {title}"
+    if not path:
+        return "Homepage"
+    if any(token in text for token in ["product", "shop", "cart", "checkout", "my-account", "woocommerce"]):
+        return "WooCommerce"
+    if any(token in text for token in ["contact", "enquiry", "quote", "booking", "form", "appointment"]):
+        return "Forms / leads"
+    if any(token in path for token in ["blog", "news", "article", "post", "insight"]):
+        return "Blog / news"
+    if any(token in text for token in ["service", "services", "solutions", "repair", "installation", "consulting"]):
+        return "Service page"
+    if any(token in text for token in ["privacy", "terms", "cookie", "policy"]):
+        return "Policy page"
+    return "Content page"
+
+
+def build_wordpress_action_queue(
+    pages: list[dict[str, Any]], issues: list[dict[str, Any]]
+) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    for page in pages:
+        url = str(page.get("url") or "")
+        if not url:
+            continue
+        page_type = str(page.get("wordpress_type") or classify_wordpress_page(page))
+        title = str(page.get("title") or "Untitled page").strip() or "Untitled page"
+        meta = str(page.get("meta_description") or "").strip()
+        word_count = safe_int(page.get("word_count"))
+        h1_count = safe_int(page.get("h1_count"))
+        status_code = safe_int(page.get("status_code"))
+        technical = page.get("technical_data") if isinstance(page.get("technical_data"), dict) else {}
+        headers = technical.get("security_headers") if isinstance(technical.get("security_headers"), dict) else {}
+        page_issues = [issue for issue in issues if issue_matches_page(url, normalize_issue_detail(issue) or issue)]
+        findings: list[str] = []
+        if status_code >= 400:
+            findings.append(f"HTTP {status_code} page error")
+        if not meta:
+            findings.append("Missing meta description")
+        elif len(meta) < 70:
+            findings.append("Short meta description")
+        if h1_count == 0:
+            findings.append("Missing H1")
+        elif h1_count > 1:
+            findings.append("Multiple H1 headings")
+        if page_type in {"Homepage", "Service page", "WooCommerce"} and 0 < word_count < 180:
+            findings.append("Thin page copy")
+        if technical and not technical.get("indexable", True):
+            findings.append("Noindex detected")
+        if technical and not technical.get("canonical"):
+            findings.append("Missing canonical")
+        if headers and not headers.get("strict_transport_security"):
+            findings.append("Missing HSTS header")
+        if page_issues:
+            findings.append(f"{len(page_issues)} audit issue(s)")
+        if not findings:
+            continue
+        priority = "High" if status_code >= 400 or "Noindex detected" in findings or len(findings) >= 4 else "Medium" if len(findings) >= 2 else "Quick win"
+        rows.append(
+            {
+                "page": url,
+                "title": title,
+                "type": page_type,
+                "priority": priority,
+                "owner": wordpress_owner(page_type, findings),
+                "finding": "; ".join(findings[:4]),
+                "action": wordpress_action(page_type, findings),
+                "where": wordpress_where_to_fix(page_type, findings),
+            }
+        )
+    priority_order = {"High": 0, "Medium": 1, "Quick win": 2}
+    return sorted(rows, key=lambda row: (priority_order.get(row["priority"], 9), row["type"], row["page"]))
+
+
+def wordpress_owner(page_type: str, findings: list[str]) -> str:
+    joined = " ".join(findings).lower()
+    if "http" in joined or "hsts" in joined or "canonical" in joined:
+        return "Developer / hosting"
+    if page_type in {"Forms / leads", "WooCommerce"}:
+        return "Website admin / plugins"
+    if "meta" in joined or "copy" in joined or "h1" in joined:
+        return "Content / SEO"
+    return "Website owner"
+
+
+def wordpress_action(page_type: str, findings: list[str]) -> str:
+    joined = " ".join(findings).lower()
+    if "http" in joined:
+        return "Restore the page, update menu/internal links, or add a 301 redirect before launch."
+    if "noindex" in joined:
+        return "Check Settings > Reading and SEO plugin robots settings before publishing."
+    if page_type == "Forms / leads":
+        return "Test the form, recipient email, Reply-To, SMTP delivery and thank-you tracking."
+    if page_type == "WooCommerce":
+        return "Check product/shop metadata, schema, checkout path, payment/shipping and conversion tracking."
+    if "hsts" in joined:
+        return "Confirm SSL is active, force HTTPS and configure security headers at hosting/CDN level."
+    return "Update WordPress page content, SEO title/meta, H1, internal links and image alt text."
+
+
+def wordpress_where_to_fix(page_type: str, findings: list[str]) -> str:
+    joined = " ".join(findings).lower()
+    if "http" in joined or "hsts" in joined:
+        return "cPanel, hosting, redirect plugin or CDN"
+    if "noindex" in joined or "canonical" in joined or "meta" in joined:
+        return "WordPress page editor and SEO plugin"
+    if page_type == "Forms / leads":
+        return "Contact Form 7 / WPForms and SMTP plugin"
+    if page_type == "WooCommerce":
+        return "WooCommerce product/shop settings and theme template"
+    return "WordPress page editor, theme builder or media library"
+
+
+def build_wordpress_checks(
+    pages: list[dict[str, Any]], action_queue: list[dict[str, str]]
+) -> list[dict[str, str]]:
+    action_text = " ".join(item["finding"].lower() for item in action_queue)
+    return [
+        {"name": "Permalinks and page structure", "status": "Review" if pages else "Needs crawl", "detail": "Use clean URLs, stable slugs, sensible menus and one static homepage."},
+        {"name": "SEO plugin fields", "status": "Needs fixes" if "meta" in action_text or "h1" in action_text else "Ready", "detail": "Check SEO title, meta description, H1, canonical and indexability for every important page."},
+        {"name": "Forms and SMTP", "status": "Manual test", "detail": "Submit contact/quote forms, check recipient, Reply-To, SMTP and spam folder before handover."},
+        {"name": "SSL and redirects", "status": "Needs fixes" if "http" in action_text or "hsts" in action_text else "Review", "detail": "Confirm HTTPS, www/non-www, mixed content, redirects and security headers."},
+        {"name": "Plugins and theme risk", "status": "Manual review", "detail": "Review plugin count, updates, PHP compatibility, theme changes and backup before live edits."},
+        {"name": "Backup and handover", "status": "Plan", "detail": "Take a backup, document admin users, revoke temporary credentials and provide client handover notes."},
+    ]
+
+
+def build_wordpress_launch_steps(type_counts: Counter[str]) -> list[dict[str, str]]:
+    return [
+        {"step": "Access and backup", "detail": "Confirm admin/cPanel access, live-site risk, backup status and rollback path."},
+        {"step": "Core settings", "detail": "Check General, Reading, Permalinks, timezone, site title and search visibility."},
+        {"step": "Content QA", "detail": "Review pages, menus, H1s, metadata, image alt text and mobile layout."},
+        {"step": "Forms and email", "detail": "Test contact forms, SMTP, Reply-To and real inbox delivery."},
+        {"step": "SEO and indexing", "detail": "Check sitemap, robots, canonical, noindex, redirects and Search Console submission."},
+        {"step": "Performance and security", "detail": "Review caching, image size, SSL, mixed content, plugin updates and security headers."},
+        {"step": "WooCommerce" if type_counts.get("WooCommerce") else "Conversion path", "detail": "Test cart/checkout/payment or lead form tracking if the site has ecommerce or enquiry journeys."},
+        {"step": "Handover", "detail": "Document what changed, what was tested, open risks and recommended follow-up work."},
+    ]
+
+
+def build_wordpress_handover_items(type_counts: Counter[str]) -> list[dict[str, str]]:
+    return [
+        {"label": "What was changed", "example": "Updated page content, metadata, form settings, redirects or plugin/theme configuration."},
+        {"label": "What was tested", "example": "Homepage, key pages, forms, mobile layout, SSL, sitemap, SEO fields and checkout/lead journeys."},
+        {"label": "Risks or pending confirmations", "example": "DNS propagation, plugin conflicts, email deliverability, payment gateway or client content approval."},
+        {"label": "Client should check next", "example": "Submit a form, place a test order if WooCommerce is present, and confirm business details are correct."},
+        {"label": "Recommended follow-up", "example": "Run OpenAudit scans monthly and after plugin/theme/content changes."},
     ]
 
 

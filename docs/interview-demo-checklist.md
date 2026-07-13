@@ -18,9 +18,10 @@ Use this checklist when presenting OpenAudit Hub from a laptop.
 4. Open **SEO Advanced > Keyword suggestions** and show the first recommended content edit.
 5. Open **eCommerce > Shopify readiness** and explain product pages, collections, subscriptions, promotions, and CRO actions.
 6. Open **eCommerce > Conversion tracking** and connect the event map to your GTM / GA4 screenshots.
-7. Open **Accessibility > Issues** and explain one issue using evidence, owner, and remediation steps.
-8. Open **Quality Assurance > Broken links** and show how broken URLs become an actionable fix list.
-9. Use the page search box to inspect a crawled page and show page-scoped findings.
+7. Open **WordPress > WordPress readiness** and explain SEO plugin fields, forms/SMTP, SSL, backup, WooCommerce and handover checks.
+8. Open **Accessibility > Issues** and explain one issue using evidence, owner, and remediation steps.
+9. Open **Quality Assurance > Broken links** and show how broken URLs become an actionable fix list.
+10. Use the page search box to inspect a crawled page and show page-scoped findings.
 
 ## Short positioning line
 
@@ -32,6 +33,7 @@ OpenAudit Hub is an open-source website governance dashboard inspired by Siteimp
 - Shopify Plus operations: use the eCommerce readiness page to talk through day-to-day product listings, collections, seasonal launches, promotions, subscription programs, app/theme handoff, and QA.
 - CRO and analytics: use GA4/GTM to measure whether fixes improve add-to-cart, checkout, form submissions, phone calls, or quote requests.
 - Campaigns: use Search Console CSV and keyword recommendations to improve landing pages for real queries.
+- WordPress operations: use the WordPress readiness and launch checklist pages to discuss admin work, SEO plugins, cPanel/DNS/SSL safety, contact forms, SMTP, backups, WooCommerce, and client handover.
 - Team workflow: assign issues to content, SEO, development, or marketing owners and track them through resolution.
 
 ## If something fails live
