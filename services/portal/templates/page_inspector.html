@@ -37,6 +37,9 @@
           <article><span>Crawl depth</span><strong>{{ crawl_page.depth }}</strong></article>
           <article><span>Discovered by</span><strong>{{ crawl_page.source|replace('-', ' ')|title }}</strong></article>
           <article><span>Content type</span><strong>{{ crawl_page.content_type or "Unknown" }}</strong></article>
+          <article><span>Word count</span><strong>{{ crawl_page.word_count }}</strong></article>
+          <article><span>H1 headings</span><strong>{{ crawl_page.h1_count }}</strong></article>
+          <article><span>Language</span><strong>{{ crawl_page.language or "Not declared" }}</strong></article>
         </section>
 
         {% if crawl_page.error %}

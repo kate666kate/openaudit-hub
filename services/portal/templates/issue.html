@@ -49,9 +49,9 @@
             </span>
           </a>
           <span>Open tools</span>
-          <a href="{{ lighthouse.report_href }}" target="_blank" rel="noreferrer">Full Lighthouse report</a>
-          <a href="{{ pa11y_url }}" target="_blank" rel="noreferrer">Pa11y Dashboard</a>
-          <a href="{{ lhci_url }}" target="_blank" rel="noreferrer">Lighthouse CI</a>
+          <a class="issue-tool-link" href="{{ lighthouse.report_href }}" target="_blank" rel="noreferrer">Full Lighthouse report</a>
+          <a class="issue-tool-link" href="{{ pa11y_url }}" target="_blank" rel="noreferrer">Pa11y Dashboard</a>
+          <a class="issue-tool-link" href="{{ lhci_url }}" target="_blank" rel="noreferrer">Lighthouse CI</a>
         </nav>
       </aside>
 
@@ -94,6 +94,31 @@
             <small>{{ issue.fix_guidance.priority }} priority</small>
           </div>
         </section>
+
+        <section class="issue-context-strip">
+          <article>
+            <span>Working on</span>
+            <strong>{{ selected_site_label }}</strong>
+            <p>{{ issue_context.selected_site }}</p>
+          </article>
+          <article>
+            <span>Likely owner</span>
+            <strong>{{ issue_context.owner }}</strong>
+            <p>Start with the team that owns the component or template shown below.</p>
+          </article>
+          <article>
+            <span>First change to make</span>
+            <strong>{{ issue_context.first_step or "Open the evidence section first." }}</strong>
+            <p>{{ issue_context.success_signal or "Rescan after the fix to confirm the issue is gone." }}</p>
+          </article>
+        </section>
+
+        {% if not issue_context.site_match and issue_context.report_site %}
+        <section class="issue-site-warning">
+          <strong>Website mismatch detected</strong>
+          <p>You are viewing the issue page for <b>{{ selected_site_label }}</b>, but the latest Lighthouse evidence loaded here came from <b>{{ issue_context.report_site }}</b>. Run a new scan for the selected website before using this page as your final source of truth.</p>
+        </section>
+        {% endif %}
 
         {% if lighthouse.report_source %}
         <section class="report-source-card" aria-label="Report source">
@@ -152,11 +177,27 @@
             </div>
             <a class="link-button" href="{{ lighthouse.report_href }}" target="_blank" rel="noreferrer">Open full audit</a>
           </div>
+          {% if issue_context.affected_pages %}
+          <div class="issue-affected-pages">
+            <span>Pages most likely affected right now</span>
+            <div>
+              {% for page_url in issue_context.affected_pages %}
+              <a href="{{ page_url }}" target="_blank" rel="noreferrer">{{ page_url }}</a>
+              {% endfor %}
+            </div>
+          </div>
+          {% endif %}
           {% if issue.affected_examples %}
           <div class="affected-list detail">
             {% for example in issue.affected_examples %}
             <article>
               {% if example.page_url %}<a class="evidence-page-url" href="{{ example.page_url }}" target="_blank" rel="noreferrer">{{ example.page_url }}</a>{% endif %}
+              {% if example.screenshot_path %}
+              <figure class="visual-evidence">
+                <img src="/reports/{{ example.screenshot_path }}" alt="Screenshot of the affected element highlighted on {{ selected_site_label }}" loading="lazy">
+                <figcaption><strong>Highlighted on the scanned page</strong><span>The red outline marks the first element matching this selector.</span></figcaption>
+              </figure>
+              {% endif %}
               <span>{{ example.selector }}</span>
               {% if example.snippet %}<code>{{ example.snippet }}</code>{% endif %}
               {% if example.explanation %}<p>{{ example.explanation }}</p>{% endif %}
@@ -269,6 +310,10 @@
               <p class="label">Activity plan</p>
               <h3>Suggested work item</h3>
             </div>
+          </div>
+          <div class="issue-closeout-banner">
+            <strong>How to close this issue</strong>
+            <p>Make the change on the affected page or template, run a fresh scan for {{ selected_site_label }}, then confirm that the issue disappears or the score improves.</p>
           </div>
           <div class="activity-plan">
             <article>

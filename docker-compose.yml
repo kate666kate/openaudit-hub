@@ -35,6 +35,7 @@ services:
     volumes:
       - ./outputs/reports:/app/reports
       - ./config/lhci:/app/config/lhci:ro
+      - ./config/search-console:/app/config/search-console
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health/ready', timeout=5)"]
       interval: 15s
@@ -88,8 +89,10 @@ services:
       CELERY_RESULT_BACKEND: redis://redis:6379/1
       REPORTS_DIR: /reports
       LIGHTHOUSE_SETTINGS_PRESET: ${LIGHTHOUSE_SETTINGS_PRESET:-desktop}
-      LIGHTHOUSE_PAGE_LIMIT: ${LIGHTHOUSE_PAGE_LIMIT:-3}
+      LIGHTHOUSE_PAGE_LIMIT: ${LIGHTHOUSE_PAGE_LIMIT:-10}
+      LIGHTHOUSE_CONCURRENCY: ${LIGHTHOUSE_CONCURRENCY:-2}
       PA11Y_PAGE_LIMIT: ${PA11Y_PAGE_LIMIT:-20}
+      EVIDENCE_SCREENSHOT_LIMIT: ${EVIDENCE_SCREENSHOT_LIMIT:-5}
       PA11Y_STANDARD: ${PA11Y_STANDARD:-WCAG2AA}
       PA11Y_TIMEOUT_MS: ${PA11Y_TIMEOUT_MS:-60000}
       CRAWL_MAX_DEPTH: ${CRAWL_MAX_DEPTH:-3}

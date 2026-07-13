@@ -144,6 +144,75 @@
     });
   }
 
+  function installNavigationDrawer() {
+    const toggle = document.querySelector(".si-drawer-toggle");
+    const drawer = document.querySelector("#si-navigation-drawer");
+    const scrim = document.querySelector(".si-drawer-scrim");
+    if (!toggle || !drawer || !scrim) return;
+
+    const close = () => {
+      document.body.classList.remove("si-drawer-open");
+      toggle.setAttribute("aria-expanded", "false");
+    };
+    const open = () => {
+      document.body.classList.add("si-drawer-open");
+      toggle.setAttribute("aria-expanded", "true");
+      const search = drawer.querySelector("#si-menu-search");
+      if (search) search.focus();
+    };
+
+    toggle.addEventListener("click", () => {
+      if (document.body.classList.contains("si-drawer-open")) close();
+      else open();
+    });
+    scrim.addEventListener("click", close);
+    drawer.addEventListener("click", (event) => {
+      if (event.target.closest("a[href]") && window.matchMedia("(max-width: 1080px)").matches) close();
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && document.body.classList.contains("si-drawer-open")) close();
+    });
+    window.matchMedia("(min-width: 1081px)").addEventListener("change", (event) => {
+      if (event.matches) close();
+    });
+  }
+
+  function installCopyButtons() {
+    document.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-copy-text]");
+      if (!button) return;
+      const text = button.dataset.copyText || "";
+      const markCopied = () => {
+        const original = button.textContent;
+        button.textContent = "Copied";
+        button.disabled = true;
+        window.setTimeout(() => {
+          button.textContent = original;
+          button.disabled = false;
+        }, 1400);
+      };
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(markCopied).catch(() => {});
+        return;
+      }
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.setAttribute("readonly", "");
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      try {
+        document.execCommand("copy");
+        markCopied();
+      } finally {
+        textarea.remove();
+      }
+    });
+  }
+
   installMenuSearch();
   installPageSearch();
+  installNavigationDrawer();
+  installCopyButtons();
 })();

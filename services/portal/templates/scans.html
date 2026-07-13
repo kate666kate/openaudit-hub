@@ -14,16 +14,67 @@
       <main class="si-main">
         <div class="si-heading"><div><p class="label">Operations</p><h1>Scans</h1><p>Queue audits and follow their progress without blocking the dashboard.</p></div></div>
         {% if queue_error %}<div class="si-form-message error"><strong>Scan was not queued</strong><span>{{ queue_error }}</span></div>{% endif %}
+        <section class="si-wide-card si-scan-ops">
+          <div class="si-card-head">
+            <div><h2>Scan control center</h2><span>Use this page to decide what kind of scan to run, then watch it finish before reviewing results in the dashboard.</span></div>
+            <div class="si-card-actions">
+              <a class="si-button-secondary" href="/websites">Manage websites</a>
+              <a href="/">Back to dashboard</a>
+            </div>
+          </div>
+          <div class="si-admin-grid">
+            <article class="si-admin-panel">
+              <span class="si-admin-kicker">When to run full audit</span>
+              <p>Use a full audit after major website updates, before demos, or when you want Lighthouse, accessibility, and content signals refreshed together.</p>
+            </article>
+            <article class="si-admin-panel">
+              <span class="si-admin-kicker">When to run targeted scan</span>
+              <p>Use Accessibility when fixing WCAG issues, Content when reviewing copy and metadata quality, and Lighthouse only when you mainly care about score changes.</p>
+            </article>
+            <article class="si-admin-panel">
+              <span class="si-admin-kicker">What happens next</span>
+              <ol class="si-admin-list">
+                <li>Start the scan here.</li>
+                <li>Wait for status to move to completed.</li>
+                <li>Open the website dashboard and issue pages to review updated findings.</li>
+              </ol>
+            </article>
+          </div>
+        </section>
         <section class="si-wide-card si-scan-launch">
           <div class="si-card-head"><div><h2>Run a scan</h2><span>Page discovery and Lighthouse execute in the background worker</span></div></div>
+          <div class="si-inline-guidance si-scan-guidance">
+            <article><strong>Full audit</strong><span>Best for general health checks and stakeholder demos.</span></article>
+            <article><strong>Accessibility</strong><span>Best after fixing Pa11y or WCAG issues.</span></article>
+            <article><strong>Content / Lighthouse</strong><span>Best for focused checks when you do not need the whole workflow.</span></article>
+          </div>
           <form method="post" action="/scans" class="si-scan-form">
             <label><span>Website</span><select name="website_key" required>{% for website in websites %}<option value="{{ website.key }}">{{ website.name }}</option>{% endfor %}</select></label>
-            <label><span>Scan type</span><select name="scan_type"><option value="full">Full audit</option><option value="accessibility">Accessibility (Pa11y)</option><option value="lighthouse">Lighthouse only</option></select></label>
+            <label><span>Scan type</span><select name="scan_type"><option value="full">Full audit</option><option value="accessibility">Accessibility (Pa11y)</option><option value="content">Content quality</option><option value="lighthouse">Lighthouse only</option></select></label>
             <button type="submit">Start scan</button>
           </form>
         </section>
         <section class="si-wide-card">
           <div class="si-card-head"><div><h2>Scan activity</h2><span>Refreshes every 15 seconds</span></div></div>
+          {% if jobs %}
+          <div class="si-scan-focus">
+            <article>
+              <span>Latest job</span>
+              <strong>{{ jobs[0].website_key }}</strong>
+              <p>{{ jobs[0].scan_type|title }} &middot; {{ jobs[0].status|replace('_', ' ')|title }}</p>
+            </article>
+            <article>
+              <span>Progress</span>
+              <strong>{{ jobs[0].progress }}%</strong>
+              <p>{{ jobs[0].message or 'Waiting for update.' }}</p>
+            </article>
+            <article>
+              <span>After completion</span>
+              <strong>Review updated findings</strong>
+              <p>Go back to the dashboard or issue list for the same website to see refreshed results.</p>
+            </article>
+          </div>
+          {% endif %}
           <div class="si-scan-list">
             <div class="si-scan-row si-scan-head"><span>Website</span><span>Type</span><span>Status</span><span>Progress</span><span>Started</span><span>Result</span></div>
             {% for job in jobs %}

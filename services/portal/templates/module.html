@@ -11,8 +11,8 @@
       <strong>OpenAudit</strong>
       <nav aria-label="Account links">
         <a href="/">Dashboard</a>
-        <a href="#">Help Center</a>
-        <a href="#">Settings</a>
+        <a href="/modules/feature-coverage{% if selected_site_key %}?site={{ selected_site_key }}{% endif %}">Help</a>
+        <a href="/websites">Settings</a>
       </nav>
     </header>
 
@@ -54,7 +54,99 @@
           </div>
         </div>
 
-        {% if page.slug in ["issues", "accessibility-issues"] %}
+        {% if page.slug == "activity-plans" %}
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>Activity plan overview</h2>
+            <div class="si-card-head-actions"><span>{{ activity_plan_center.actionable }} item(s) still need action</span><a class="si-button-secondary" href="/api/activity-plans/export.csv?site={{ selected_site_key }}">Export CSV</a></div>
+          </div>
+          <div class="si-activity-summary">
+            <article><span>Total work</span><strong>{{ activity_plan_center.total }}</strong><small>SEO recommendations and audit issues</small></article>
+            <article><span>To do</span><strong>{{ activity_plan_center.actionable }}</strong><small>Suggested, accepted, assigned or active</small></article>
+            <article><span>Completed</span><strong>{{ activity_plan_center.completed }}</strong><small>Confirmed or marked complete</small></article>
+            <article><span>Completion</span><strong>{{ activity_plan_center.completion_rate }}%</strong><small>Across the current website plan</small></article>
+          </div>
+          <div class="si-workload-overview">
+            <div><strong>Work by owner</strong><div>{% for owner in activity_plan_center.owner_workload %}<span>{{ owner.owner }} <b>{{ owner.count }}</b></span>{% else %}<span>No active assignments</span>{% endfor %}</div></div>
+            <div><strong>Work by type</strong><div>{% for kind in activity_plan_center.work_types %}<span>{{ kind.label }} <b>{{ kind.count }}</b></span>{% else %}<span>No planned work</span>{% endfor %}</div></div>
+          </div>
+          <nav class="si-activity-filters" aria-label="Activity plan filters">
+            {% for filter in activity_plan_center.filters %}
+            <a class="{{ 'active' if filter.key == activity_plan_center.selected_status else '' }}" href="/modules/activity-plans?site={{ selected_site_key }}&amp;status={{ filter.key }}">{{ filter.label }} <b>{{ filter.count }}</b></a>
+            {% endfor %}
+          </nav>
+        </section>
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>{{ activity_plan_center.selected_status|replace('_', ' ')|title }} work</h2>
+            <span>Update ownership and status without leaving this page</span>
+          </div>
+          {% if activity_plan_center.rows %}
+          <div class="si-activity-list">
+            {% for item in activity_plan_center.rows %}
+            <article class="si-activity-item si-activity-item-{{ item.kind }}">
+              <div class="si-activity-copy">
+                <div class="si-decision-line">
+                  <span class="si-activity-kind">{{ 'Keyword' if item.kind == 'keyword' else 'Content' if item.kind == 'content' else 'Audit issue' }}</span>
+                  <span class="si-workflow-status si-workflow-status-{{ item.status }}">{{ item.status|replace('_', ' ')|title }}</span>
+                  <span class="si-activity-priority">{{ item.priority }}</span>
+                </div>
+                <h3>{{ item.title }}</h3>
+                <p>{{ item.subtitle }}</p>
+                {% if item.page_url %}<a href="{{ item.page_url }}" target="_blank" rel="noreferrer">{{ item.page_url }}</a>{% endif %}
+                {% if item.note %}<blockquote>{{ item.note }}</blockquote>{% endif %}
+                <small>{% if item.points != '-' %}{{ item.points }} priority point(s) &middot; {% endif %}Owner: {{ item.owner }}</small>
+              </div>
+              {% if item.kind == 'keyword' %}
+              <form class="si-activity-update" method="post" action="/api/keyword-actions">
+                <input type="hidden" name="site" value="{{ selected_site_key }}">
+                <input type="hidden" name="page_url" value="{{ item.page_url }}">
+                <input type="hidden" name="keyword" value="{{ item.keyword }}">
+                <input type="hidden" name="decision" value="{{ item.decision }}">
+                <input type="hidden" name="note" value="{{ item.note }}">
+                <input type="hidden" name="return_to" value="/modules/activity-plans?site={{ selected_site_key }}&amp;status={{ activity_plan_center.selected_status }}">
+                <label><span>Status</span><select name="status">{% for status in ['suggested','accepted','in_progress','completed','ignored'] %}<option value="{{ status }}" {% if item.status == status %}selected{% endif %}>{{ status|replace('_',' ')|title }}</option>{% endfor %}</select></label>
+                <label><span>Owner</span><input name="owner" value="{{ item.owner }}" maxlength="255"></label>
+                <button class="si-button-primary" type="submit">Save</button>
+                <a class="si-button-secondary" href="/modules/keyword-suggestions?site={{ selected_site_key }}">Open recommendation</a>
+              </form>
+              {% elif item.kind == 'content' %}
+              <form class="si-activity-update" method="post" action="/api/content-actions">
+                <input type="hidden" name="site" value="{{ selected_site_key }}">
+                <input type="hidden" name="action_type" value="{{ item.action_type }}">
+                <input type="hidden" name="title" value="{{ item.title }}">
+                <input type="hidden" name="primary_url" value="{{ item.page_url }}">
+                <input type="hidden" name="affected_urls" value="{{ item.affected_urls|join('|') }}">
+                <input type="hidden" name="points" value="{{ item.points }}">
+                <input type="hidden" name="note" value="{{ item.note }}">
+                <input type="hidden" name="return_to" value="/modules/activity-plans?site={{ selected_site_key }}&amp;status={{ activity_plan_center.selected_status }}">
+                <label><span>Status</span><select name="status">{% for status in ['suggested','accepted','in_progress','completed','ignored'] %}<option value="{{ status }}" {% if item.status == status %}selected{% endif %}>{{ status|replace('_',' ')|title }}</option>{% endfor %}</select></label>
+                <label><span>Owner</span><input name="owner" value="{{ item.owner }}" maxlength="255"></label>
+                <button class="si-button-primary" type="submit">Save</button>
+                <a class="si-button-secondary" href="/modules/{{ 'content-optimization' if item.action_type == 'content-optimization' else 'duplicate-content' }}?site={{ selected_site_key }}">Open source</a>
+              </form>
+              {% else %}
+              <form class="si-activity-update" method="post" action="/issues/lifecycle/{{ item.issue_id }}">
+                <input type="hidden" name="site" value="{{ selected_site_key }}">
+                <input type="hidden" name="return_to" value="/modules/activity-plans?site={{ selected_site_key }}&amp;status={{ activity_plan_center.selected_status }}">
+                <label><span>Status</span><select name="status">{% for status in ['open','assigned','in_progress','resolved','ignored'] %}<option value="{{ status }}" {% if item.status == status %}selected{% endif %}>{{ status|replace('_',' ')|title }}</option>{% endfor %}</select></label>
+                <label><span>Owner</span><input name="owner" value="{{ item.owner }}" maxlength="255"></label>
+                <button class="si-button-primary" type="submit">Save</button>
+                {% if item.issue_key %}<a class="si-button-secondary" href="/issues/{{ item.issue_key }}?site={{ selected_site_key }}">Open issue</a>{% endif %}
+              </form>
+              {% endif %}
+            </article>
+            {% endfor %}
+          </div>
+          {% else %}
+          <div class="si-activity-empty">
+            <strong>No work in this view</strong>
+            <p>Choose another filter or run a new scan to generate recommendations.</p>
+          </div>
+          {% endif %}
+        </section>
+
+        {% elif page.slug in ["issues", "accessibility-issues"] %}
         <section class="si-wide-card">
           <div class="si-card-head">
             <h2>Issues and recommendations</h2>
@@ -124,6 +216,22 @@
           </div>
         </section>
         {% endif %}
+
+        {% elif page.slug == "performance-budgets" %}
+        <section class="si-wide-card">
+          <div class="si-card-head"><div><h2>Performance budget status</h2><span>{{ budget_summary.status }}</span></div><a class="si-button-secondary" href="/websites">Edit thresholds</a></div>
+          <div class="si-budget-status-grid">
+            {% for target in budget_summary.targets %}
+            <article class="si-budget-status si-budget-status-{{ target.status|lower|replace(' ', '-') }}">
+              <span>{{ target.label }}</span><strong>{{ target.current }}</strong><small>{{ target.target }}</small><b>{{ target.status }}</b>
+            </article>
+            {% endfor %}
+          </div>
+        </section>
+        <section class="si-wide-card">
+          <div class="si-card-head"><div><h2>Budget violations</h2><span>{{ budget_summary.failed }} active issue(s)</span></div><a href="/scans?site={{ selected_site_key }}">Run Lighthouse scan</a></div>
+          {% if budget_summary.issues %}<div class="si-content-page-list">{% for issue in budget_summary.issues %}<article><div class="si-content-page-head"><div><span>{{ issue.priority|title }} &middot; {{ issue.points }} points</span><h3>{{ issue.title }}</h3><p>{{ issue.evidence[0].explanation if issue.evidence else 'Open the issue for measured evidence.' }}</p></div><a class="si-button-secondary" href="/issues/{{ issue.audit_id }}?site={{ selected_site_key }}">Open issue</a></div></article>{% endfor %}</div>{% else %}<div class="si-activity-empty"><strong>No active budget violations</strong><p>Run a Lighthouse or Full audit after changing thresholds to validate every selected page.</p></div>{% endif %}
+        </section>
 
         {% elif page.slug == "issue-detail-preview" %}
         {% if lighthouse.top_priority %}
@@ -239,10 +347,10 @@
               <span>Source</span>
               <strong>{{ keywords.source }}</strong>
             </div>
-            <label class="si-keyword-search">
-              <span>Search keyword</span>
-              <input type="search" placeholder="Filter suggestions after export" disabled>
-            </label>
+            <div class="si-filter-control">
+              <span>Evidence level</span>
+              <strong>{{ "Search Console validated" if keywords.search_console.connected else "Crawl evidence only" }}</strong>
+            </div>
           </div>
           <div class="si-keyword-overview">
             <article class="si-keyword-score">
@@ -251,9 +359,9 @@
               <small>/100 starter score</small>
             </article>
             <article>
-              <span>Points you can gain</span>
+              <span>Opportunity score</span>
               <strong>{{ keywords.overview.points_available }}</strong>
-              <small>estimated from crawl + SEO issues</small>
+              <small>prioritization signal, not forecast traffic</small>
             </article>
             <article>
               <span>Suggestions</span>
@@ -279,17 +387,263 @@
         </section>
         <section class="si-wide-card">
           <div class="si-card-head">
+            <h2>SEO opportunities</h2>
+            <span>One recommended action first; everything else is secondary</span>
+          </div>
+          {% if request.args.get("workflow") == "saved" %}
+          <div class="si-import-notice si-import-notice-success" role="status">
+            <strong>Activity plan updated</strong>
+            <span>The status, owner and note are saved for this website.</span>
+          </div>
+          {% elif request.args.get("workflow") == "error" %}
+          <div class="si-import-notice si-import-notice-error" role="alert">
+            <strong>Activity plan could not be updated</strong>
+            <span>{{ request.args.get("message", "Check the task and try again.") }}</span>
+          </div>
+          {% endif %}
+          {% if keywords.page_edit_queue %}
+          <div class="si-start-grid si-start-grid-primary">
+            {% for item in keywords.page_edit_queue[:1] %}
+            <article class="si-start-card">
+              <div class="si-start-card-head">
+                <span>Start here &middot; {{ item.priority }}</span>
+                <strong>{{ item.keyword }}</strong>
+              </div>
+              <a href="{{ item.page }}" target="_blank" rel="noreferrer">{{ item.page }}</a>
+              <div class="si-decision-line">
+                <span class="si-decision-pill">{{ item.decision_label }}</span>
+                <span class="si-confidence si-confidence-{{ item.confidence_class or 'needs-data' }}">{{ item.confidence }}</span>
+                <span class="si-workflow-status si-workflow-status-{{ item.workflow.status }}">{{ item.workflow.status|replace('_', ' ')|title }}</span>
+              </div>
+              <p>{{ item.why_now }}</p>
+              {% if item.edit_brief %}
+              <div class="si-first-edit">
+                <span>Your first edit</span>
+                <strong>{{ item.edit_brief.title }}</strong>
+                <p>{{ item.edit_brief.do }}</p>
+              </div>
+              {% endif %}
+              <dl>
+                <dt>Decision</dt><dd>{{ item.decision_label }}</dd>
+                <dt>Confidence</dt><dd>{{ item.confidence }}</dd>
+                <dt>Start with</dt><dd>{{ item.focus }}</dd>
+                <dt>Target query</dt><dd>{{ item.matched_query or "No Search Console match yet" }}</dd>
+                <dt>Priority score</dt><dd>{{ item.points }}</dd>
+              </dl>
+              <a class="si-button-primary" href="#fix-plan-{{ loop.index }}">See exact changes</a>
+            </article>
+            {% endfor %}
+          </div>
+          {% if keywords.page_edit_queue|length > 1 %}
+          <details class="si-secondary-opportunities">
+            <summary>Show the next priorities</summary>
+            <div>
+              {% for item in keywords.page_edit_queue[1:3] %}
+              <article>
+                <div>
+                  <span>{{ item.priority }} &middot; {{ item.focus }}</span>
+                  <strong>{{ item.keyword }}</strong>
+                  <a href="{{ item.page }}" target="_blank" rel="noreferrer">{{ item.page }}</a>
+                </div>
+                <div class="si-decision-line">
+                  <span class="si-decision-pill">{{ item.decision_label }}</span>
+                  <span class="si-confidence si-confidence-{{ item.confidence_class or 'needs-data' }}">{{ item.confidence }}</span>
+                  <span class="si-workflow-status si-workflow-status-{{ item.workflow.status }}">{{ item.workflow.status|replace('_', ' ')|title }}</span>
+                </div>
+              </article>
+              {% endfor %}
+            </div>
+          </details>
+          {% endif %}
+          {% else %}
+          <p class="si-empty">No page fix queue yet. Run a crawl and keyword analysis first.</p>
+          {% endif %}
+        </section>
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>Exact changes for your first priority</h2>
+            <span>Use this checklist, publish the edits, then scan the page again</span>
+          </div>
+          {% if keywords.page_edit_queue %}
+          <div class="si-fix-plan-list">
+            {% for item in keywords.page_edit_queue[:1] %}
+            <article id="fix-plan-{{ loop.index }}" class="si-fix-plan-card">
+              <div class="si-fix-plan-head">
+                <div>
+                  <span>{{ item.priority }} &middot; {{ item.focus }}</span>
+                  <h3>{{ item.keyword }}</h3>
+                  <a href="{{ item.page }}" target="_blank" rel="noreferrer">{{ item.page }}</a>
+                </div>
+                <strong>Score {{ item.points }}</strong>
+              </div>
+              <div class="si-keyword-workflow">
+                <div>
+                  <span>Activity plan</span>
+                  <h4>{{ item.workflow.status|replace('_', ' ')|title }}</h4>
+                  <p>Assign this recommendation and keep its state after future scans.</p>
+                  {% if item.workflow.updated_at %}<small>Last updated {{ item.workflow.updated_at }}</small>{% endif %}
+                </div>
+                <form method="post" action="/api/keyword-actions">
+                  <input type="hidden" name="site" value="{{ selected_site_key }}">
+                  <input type="hidden" name="page_url" value="{{ item.page }}">
+                  <input type="hidden" name="keyword" value="{{ item.keyword }}">
+                  <input type="hidden" name="decision" value="{{ item.decision }}">
+                  <label>
+                    <span>Status</span>
+                    <select name="status">
+                      {% for status in ['suggested', 'accepted', 'in_progress', 'completed', 'ignored'] %}
+                      <option value="{{ status }}" {% if item.workflow.status == status %}selected{% endif %}>{{ status|replace('_', ' ')|title }}</option>
+                      {% endfor %}
+                    </select>
+                  </label>
+                  <label>
+                    <span>Owner</span>
+                    <input name="owner" value="{{ item.workflow.owner }}" maxlength="255" placeholder="SEO / Content">
+                  </label>
+                  <label class="si-workflow-note">
+                    <span>Note</span>
+                    <textarea name="note" maxlength="2000" rows="2" placeholder="Record the agreed edit or reason for ignoring it">{{ item.workflow.note }}</textarea>
+                  </label>
+                  <button class="si-button-primary" type="submit">Save activity plan</button>
+                </form>
+              </div>
+              <div class="si-fix-plan-summary">
+                <div>
+                  <span>Why fix this first</span>
+                  <p>{{ item.why_now }}</p>
+                </div>
+                <div>
+                  <span>Decision</span>
+                  <p><b>{{ item.decision_label }}</b> <span class="si-confidence si-confidence-{{ item.confidence_class or 'needs-data' }}">{{ item.confidence }}</span></p>
+                  <p>{{ item.why_it_matters }}</p>
+                </div>
+              </div>
+              {% if item.content_brief %}
+              <div class="si-content-brief">
+                <div>
+                  <span>{{ item.content_brief.type }}</span>
+                  <h4>{{ item.content_brief.title }}</h4>
+                  <p>{{ item.content_brief.angle }}</p>
+                </div>
+                <div>
+                  <strong>Recommended page sections</strong>
+                  <ul>
+                    {% for section in item.content_brief.sections %}
+                    <li>{{ section }}</li>
+                    {% endfor %}
+                  </ul>
+                </div>
+                <div class="si-content-brief-notes">
+                  <p>{{ item.content_brief.internal_link }}</p>
+                  <p>{{ item.content_brief.validation }}</p>
+                </div>
+              </div>
+              {% endif %}
+              {% if item.edit_brief %}
+              <div class="si-edit-brief">
+                <strong>{{ item.edit_brief.title }}</strong>
+                <div>
+                  <span>Do</span>
+                  <p>{{ item.edit_brief.do }}</p>
+                </div>
+                <div>
+                  <span>Avoid</span>
+                  <p>{{ item.edit_brief.avoid }}</p>
+                </div>
+                <div>
+                  <span>Validate</span>
+                  <p>{{ item.edit_brief.validation }}</p>
+                </div>
+              </div>
+              {% endif %}
+              {% if item.related_issues %}
+              <div class="si-related-issues">
+                <span>Relevant issue details</span>
+                <div class="si-related-issue-list">
+                  {% for issue in item.related_issues %}
+                  <a href="{{ issue.href }}">
+                    {{ issue.title }}
+                    <small>{{ issue.match }} &middot; {{ issue.points }} pts</small>
+                  </a>
+                  {% endfor %}
+                </div>
+              </div>
+              {% endif %}
+              <div class="si-fix-task-strip">
+                {% for task in item.tasks %}
+                <section class="{% if task.important %}si-fix-task-important{% endif %}">
+                  <div class="si-fix-task-title">
+                    <strong>{{ task.label }}</strong>
+                    {% if task.metric %}<small>{{ task.metric }}</small>{% endif %}
+                  </div>
+                  <div>
+                    <span>Current</span>
+                    <p>{{ task.current }}</p>
+                  </div>
+                  <div>
+                    <span>Change to</span>
+                    <p class="si-copy-value">{{ task.suggested }}</p>
+                    {% if task.guidance %}<small>{{ task.guidance }}</small>{% endif %}
+                    <button class="si-copy-button" type="button" data-copy-text="{{ task.suggested|e }}">Copy text</button>
+                  </div>
+                </section>
+                {% endfor %}
+              </div>
+              <div class="si-fix-plan-summary">
+                <div>
+                  <span>When to do this</span>
+                  <p>{% if item.decision == "Keep" %}Leave the page mostly stable and only make small refinements if rankings or clicks slip.{% elif item.decision == "Create supporting content" %}Use this when the topic needs a guide, FAQ, comparison page, or richer supporting section instead of a small metadata tweak.{% else %}Use this when the page already matches the topic and mainly needs stronger on-page fields.{% endif %}</p>
+                </div>
+                <div>
+                  <span>What success looks like</span>
+                  <p>{% if item.decision == "Keep" %}The page holds current visibility and does not introduce new SEO issues.{% elif item.decision == "Create supporting content" %}A clearer supporting page or section exists, is internally linked, and gives search engines a better topic match.{% else %}The page fields are updated, the issue count drops, and the page becomes a clearer match for the target phrase.{% endif %}</p>
+                </div>
+              </div>
+            </article>
+            {% endfor %}
+          </div>
+          {% else %}
+          <p class="si-empty">No fix plans yet. Run a crawl and keyword analysis first.</p>
+          {% endif %}
+        </section>
+        <section class="si-wide-card">
+          <div class="si-card-head">
             <h2>Search Console insights</h2>
             <span>{{ keywords.search_console.status }} &middot; {{ keywords.search_console.source }}</span>
+          </div>
+          {% if request.args.get("gsc") == "imported" %}
+          <div class="si-import-notice si-import-notice-success" role="status">
+            <strong>Search Console data imported</strong>
+            <span>{{ request.args.get("rows", "0") }} valid row(s) added. {{ request.args.get("skipped", "0") }} row(s) skipped.</span>
+          </div>
+          {% elif request.args.get("gsc") == "error" %}
+          <div class="si-import-notice si-import-notice-error" role="alert">
+            <strong>CSV could not be imported</strong>
+            <span>{{ request.args.get("message", "Check the file and try again.") }}</span>
+          </div>
+          {% endif %}
+          <div class="si-gsc-import">
+            <div>
+              <span>Google Search Console CSV</span>
+              <h3>{{ "Replace performance data" if keywords.search_console.connected else "Add real search demand" }}</h3>
+              <p>Export the Search results report, then upload Queries.csv for real search terms or Pages.csv for page-level demand. Rows for another website are ignored automatically.</p>
+            </div>
+            <form method="post" action="/api/search-console/import" enctype="multipart/form-data">
+              <input type="hidden" name="site" value="{{ selected_site_key }}">
+              <label for="gsc-csv">CSV file</label>
+              <input id="gsc-csv" type="file" name="search_console_csv" accept=".csv,text/csv" required>
+              <small>Supported: Queries.csv or Pages.csv from Google Search Console. Recommended columns: Query or Page, Clicks, Impressions, CTR, Position. Maximum 2 MB.</small>
+              <button class="si-button-primary" type="submit">Import and refresh suggestions</button>
+            </form>
           </div>
           {% if keywords.search_console.connected %}
           <div class="si-keyword-table si-gsc-table">
             <div class="si-keyword-row si-keyword-head">
-              <span>Query</span><span>Clicks</span><span>Impressions</span><span>CTR</span><span>Position</span><span>Landing page</span>
+              <span>Search term / page topic</span><span>Clicks</span><span>Impressions</span><span>CTR</span><span>Position</span><span>Landing page</span>
             </div>
             {% for row in keywords.search_console.rows %}
             <div class="si-keyword-row">
-              <strong>{{ row.query }}<small>{{ row.source_file }}</small></strong>
+              <strong>{{ row.query }}<small>{{ row.source_file }}{% if row.source_type == "page" %} &middot; inferred from Pages.csv{% endif %}</small></strong>
               <span>{{ row.clicks or "-" }}</span>
               <span>{{ row.impressions or "-" }}</span>
               <span>{{ row.ctr or "-" }}</span>
@@ -301,117 +655,211 @@
           {% else %}
           <div class="si-connector-setup">
             <article>
-              <strong>Import Search Console CSV</strong>
-              <p>{{ keywords.search_console.next_step }}</p>
+              <strong>1. Export Search results</strong>
+              <p>In Search Console, open Performance &gt; Search results and export CSV for the website shown above. You can upload Queries.csv or Pages.csv.</p>
             </article>
             <article>
-              <strong>Recommended filename</strong>
-              <p><code>config/search-console/gsc-{{ selected_site_key }}.csv</code></p>
-            </article>
-            <article>
-              <strong>Useful columns</strong>
-              <p>Query, Page, Clicks, Impressions, CTR, Position</p>
+              <strong>2. Upload and review</strong>
+              <p>OpenAudit stores the file as <code>gsc-{{ selected_site_key }}.csv</code> and immediately rebuilds the opportunity list.</p>
             </article>
           </div>
           {% endif %}
         </section>
         <section class="si-wide-card">
           <div class="si-card-head">
-            <h2>Suggestions and recommendations</h2>
-            <span>Sort by highest impact first</span>
+            <h2>Supporting analysis</h2>
+            <span>Open these only when you want more context</span>
           </div>
-          {% if keywords.rows %}
-          <div class="si-keyword-table">
-            <div class="si-keyword-row si-keyword-head">
-              <span>Keyword</span><span>Intent</span><span>Occurrences</span><span>Difficulty</span><span>Points</span><span>Recommendation</span>
-            </div>
-            {% for row in keywords.rows %}
-            <div class="si-keyword-row">
-              <strong>{{ row.keyword }}<small>{{ row.reason }}</small></strong>
-              <span>{{ row.intent }}</span>
-              <span>{{ row.affected_pages }} page(s)</span>
-              <span class="si-status si-status-{{ row.difficulty|lower }}">{{ row.difficulty }}</span>
-              <span><b>{{ row.score_gain }}</b></span>
-              <span>{{ row.action }}</span>
-            </div>
-            {% endfor %}
-          </div>
-          {% else %}
-          <p class="si-empty">Run Lighthouse and the sitemap crawler for this website to generate starter keyword ideas.</p>
-          {% endif %}
-        </section>
-        <section class="si-wide-card">
-          <div class="si-card-head">
-            <h2>Keyword-to-page map</h2>
-            <span>Avoid page cannibalisation</span>
-          </div>
-          {% if keywords.page_opportunities %}
-          <div class="si-keyword-table si-keyword-page-table">
-            <div class="si-keyword-row si-keyword-head">
-              <span>Landing page</span><span>Target phrase</span><span>Intent</span><span>Priority</span><span>Next edit</span>
-            </div>
-            {% for row in keywords.page_opportunities %}
-            <div class="si-keyword-row">
-              <strong><a href="{{ row.page }}" target="_blank" rel="noreferrer">{{ row.page }}</a></strong>
-              <span>{{ row.suggested_keyword }}</span>
-              <span>{{ row.intent }}</span>
-              <span>{{ row.priority }}</span>
-              <span>{{ row.action }}</span>
-            </div>
-            {% endfor %}
-          </div>
-          {% else %}
-          <p class="si-empty">No page opportunities yet. Add more pages to the website list or run the sitemap crawler.</p>
-          {% endif %}
-        </section>
-        <section class="si-wide-card">
-          <div class="si-card-head">
-            <h2>Optimization briefs</h2>
-            <a class="si-button-secondary" href="/api/keyword-suggestions/export.csv?site={{ selected_site_key }}">Export edit list</a>
-          </div>
-          {% if keywords.optimization_briefs %}
-          <div class="si-brief-list">
-            {% for brief in keywords.optimization_briefs %}
-            <article>
-              <div class="si-brief-title">
-                <div>
-                  <span>{{ brief.intent }} &middot; {{ brief.priority }}</span>
-                  <h3>{{ brief.keyword }}</h3>
-                  <a href="{{ brief.page }}" target="_blank" rel="noreferrer">{{ brief.page }}</a>
+          <div class="si-supporting-list">
+            <details>
+              <summary>More keyword ideas</summary>
+              {% if keywords.rows %}
+              <div class="si-keyword-table">
+                <div class="si-keyword-row si-keyword-head">
+                  <span>Keyword</span><span>Decision</span><span>Intent</span><span>Difficulty</span><span>Points</span><span>Recommendation</span>
                 </div>
-                <strong>{{ brief.points }} pts</strong>
+                {% for row in keywords.rows %}
+                <div class="si-keyword-row">
+                  <strong>{{ row.keyword }}<small>{{ row.reason }}</small></strong>
+                  <span>{{ row.decision_label }}<small class="si-confidence si-confidence-{{ row.confidence_class or 'needs-data' }}">{{ row.confidence }}</small></span>
+                  <span>{{ row.intent }}</span>
+                  <span class="si-status si-status-{{ row.difficulty|lower }}">{{ row.difficulty }}</span>
+                  <span><b>{{ row.score_gain }}</b></span>
+                  <span>{{ row.action }}<small>{{ row.why_it_matters }}</small></span>
+                </div>
+                {% endfor %}
               </div>
-              <dl>
-                <dt>Title tag</dt><dd>{{ brief.title }}</dd>
-                <dt>H1</dt><dd>{{ brief.h1 }}</dd>
-                <dt>Meta description</dt><dd>{{ brief.meta }}</dd>
-                <dt>Intro copy</dt><dd>{{ brief.intro }}</dd>
-                <dt>Image alt</dt><dd>{{ brief.alt }}</dd>
-                <dt>Internal links</dt><dd>{{ brief.internal_links }}</dd>
-              </dl>
-            </article>
-            {% endfor %}
-          </div>
-          {% else %}
-          <p class="si-empty">Run a sitemap crawl and Lighthouse report to generate page-level SEO edit briefs.</p>
-          {% endif %}
-        </section>
-        <section class="si-wide-card">
-          <div class="si-card-head">
-            <h2>Activity plan</h2>
-            <span>Recommended workflow</span>
-          </div>
-          <div class="si-keyword-plan">
-            {% for task in keywords.activity_plan %}
-            <article>
-              <b>{{ task.step }}</b>
-              <div>
-                <strong>{{ task.title }}</strong>
-                <p>{{ task.action }}</p>
-                <small>{{ task.owner }} &middot; {{ task.points }} point(s)</small>
+              {% else %}
+              <p class="si-empty">Run Lighthouse and the sitemap crawler for this website to generate starter keyword ideas.</p>
+              {% endif %}
+            </details>
+            <details>
+              <summary>Real query opportunities</summary>
+              {% if keywords.search_console_actions %}
+              <div class="si-opportunity-board">
+                {% for item in keywords.search_console_actions %}
+                <article>
+                  <div class="si-opportunity-head">
+                    <span>{{ item.priority }}</span>
+                    <strong>{{ item.query }}</strong>
+                  </div>
+                  <a href="{{ item.page }}" target="_blank" rel="noreferrer">{{ item.page }}</a>
+                  <div class="si-decision-line">
+                    <span class="si-decision-pill">{{ item.decision_label }}</span>
+                    <span class="si-confidence si-confidence-{{ item.confidence_class or 'needs-data' }}">{{ item.confidence }}</span>
+                  </div>
+                  <p>{{ item.why_now }}</p>
+                  <dl>
+                    <dt>Confidence</dt><dd>{{ item.confidence }}</dd>
+                    <dt>Clicks</dt><dd>{{ item.clicks }}</dd>
+                    <dt>Impressions</dt><dd>{{ item.impressions }}</dd>
+                    <dt>Position</dt><dd>{{ item.position }}</dd>
+                    <dt>Focus first</dt><dd>{{ item.focus }}</dd>
+                    <dt>Next edit</dt><dd>{{ item.action }}</dd>
+                  </dl>
+                </article>
+                {% endfor %}
               </div>
-            </article>
-            {% endfor %}
+              {% else %}
+              <p class="si-empty">Import Search Console data to see query-driven opportunities here.</p>
+              {% endif %}
+            </details>
+            <details>
+              <summary>Keyword-to-page map</summary>
+              {% if keywords.page_opportunities %}
+              <div class="si-keyword-table si-keyword-page-table">
+                <div class="si-keyword-row si-keyword-head">
+                  <span>Landing page</span><span>Target phrase</span><span>Decision</span><span>Priority</span><span>Next edit</span>
+                </div>
+                {% for row in keywords.page_opportunities %}
+                <div class="si-keyword-row">
+                  <strong><a href="{{ row.page }}" target="_blank" rel="noreferrer">{{ row.page }}</a></strong>
+                  <span>{{ row.suggested_keyword }}</span>
+                  <span>{{ row.decision_label }}<small class="si-confidence si-confidence-{{ row.confidence_class or 'needs-data' }}">{{ row.confidence }}</small></span>
+                  <span>{{ row.priority }}</span>
+                  <span>{{ row.action }}</span>
+                </div>
+                {% endfor %}
+              </div>
+              {% else %}
+              <p class="si-empty">No page opportunities yet. Add more pages to the website list or run the sitemap crawler.</p>
+              {% endif %}
+            </details>
+            <details>
+              <summary>Cannibalization watch</summary>
+              {% if keywords.cannibalization %}
+              <div class="si-cannibalization-list">
+                {% for item in keywords.cannibalization %}
+                <article>
+                  <strong>{{ item.keyword }}</strong>
+                  <p>{{ item.count }} page(s) appear to compete for this phrase.</p>
+                  <ul>
+                    {% for page_url in item.pages %}
+                    <li><a href="{{ page_url }}" target="_blank" rel="noreferrer">{{ page_url }}</a></li>
+                    {% endfor %}
+                  </ul>
+                  <small>{{ item.action }}</small>
+                </article>
+                {% endfor %}
+              </div>
+              {% else %}
+              <p class="si-empty">No obvious phrase overlap detected in the current page map.</p>
+              {% endif %}
+            </details>
+            <details>
+              <summary>Full optimization briefs</summary>
+              {% if keywords.optimization_briefs %}
+              <div class="si-supporting-head-row">
+                <a class="si-button-secondary" href="/api/keyword-suggestions/export.csv?site={{ selected_site_key }}">Export edit list</a>
+              </div>
+              <div class="si-brief-list">
+                {% for brief in keywords.optimization_briefs %}
+                <article>
+                  <div class="si-brief-title">
+                    <div>
+                      <span>{{ brief.intent }} &middot; {{ brief.priority }}</span>
+                      <h3>{{ brief.keyword }}</h3>
+                      <a href="{{ brief.page }}" target="_blank" rel="noreferrer">{{ brief.page }}</a>
+                    </div>
+                    <strong>{{ brief.points }} pts</strong>
+                  </div>
+                  <dl>
+                    <dt>Decision</dt><dd>{{ brief.decision_label }}</dd>
+                    <dt>Confidence</dt><dd><span class="si-confidence si-confidence-{{ brief.confidence_class or 'needs-data' }}">{{ brief.confidence }}</span></dd>
+                    <dt>Why now</dt><dd>{{ brief.why_now or "Use this brief to improve topical relevance and on-page SEO clarity." }}</dd>
+                    <dt>Why this matters</dt><dd>{{ brief.why_it_matters or "This recommendation helps the page match the topic more clearly for users and search engines." }}</dd>
+                    <dt>Current title</dt><dd>{{ brief.current_title or "Missing or not captured yet" }}</dd>
+                    <dt>Current H1</dt><dd>{{ brief.current_h1 or "Missing or not captured yet" }}</dd>
+                    <dt>Current meta</dt><dd>{{ brief.current_meta or "Missing or not captured yet" }}</dd>
+                    <dt>Focus first</dt><dd>{{ brief.focus or "On-page SEO" }}</dd>
+                    <dt>Title tag</dt><dd>{{ brief.title }}</dd>
+                    <dt>H1</dt><dd>{{ brief.h1 }}</dd>
+                    <dt>Meta description</dt><dd>{{ brief.meta }}</dd>
+                    <dt>Intro copy</dt><dd>{{ brief.intro }}</dd>
+                    <dt>Image alt</dt><dd>{{ brief.alt }}</dd>
+                    <dt>Internal links</dt><dd>{{ brief.internal_links }}</dd>
+                    <dt>Matched query</dt><dd>{{ brief.matched_query or "No Search Console match yet" }}</dd>
+                  </dl>
+                  {% if brief.content_brief %}
+                  <div class="si-content-brief si-content-brief-compact">
+                    <div>
+                      <span>{{ brief.content_brief.type }}</span>
+                      <h4>{{ brief.content_brief.title }}</h4>
+                      <p>{{ brief.content_brief.angle }}</p>
+                    </div>
+                    <div>
+                      <strong>Content structure</strong>
+                      <ul>
+                        {% for section in brief.content_brief.sections %}
+                        <li>{{ section }}</li>
+                        {% endfor %}
+                      </ul>
+                    </div>
+                  </div>
+                  {% endif %}
+                  {% if brief.edit_brief %}
+                  <div class="si-edit-brief si-edit-brief-compact">
+                    <strong>{{ brief.edit_brief.title }}</strong>
+                    <p><b>Do:</b> {{ brief.edit_brief.do }}</p>
+                    <p><b>Avoid:</b> {{ brief.edit_brief.avoid }}</p>
+                    <p><b>Validate:</b> {{ brief.edit_brief.validation }}</p>
+                  </div>
+                  {% endif %}
+                  {% if brief.related_issues %}
+                  <div class="si-related-issues si-related-issues-padded">
+                    <span>Issue details to review while editing</span>
+                    <div class="si-related-issue-list">
+                      {% for issue in brief.related_issues %}
+                      <a href="{{ issue.href }}">
+                        {{ issue.title }}
+                        <small>{{ issue.match }} &middot; {{ issue.category }}</small>
+                      </a>
+                      {% endfor %}
+                    </div>
+                  </div>
+                  {% endif %}
+                </article>
+                {% endfor %}
+              </div>
+              {% else %}
+              <p class="si-empty">Run a sitemap crawl and Lighthouse report to generate page-level SEO edit briefs.</p>
+              {% endif %}
+            </details>
+            <details>
+              <summary>Activity plan</summary>
+              <div class="si-keyword-plan">
+                {% for task in keywords.activity_plan %}
+                <article>
+                  <b>{{ task.step }}</b>
+                  <div>
+                    <strong>{{ task.title }}</strong>
+                    <p>{{ task.action }}</p>
+                    <small>{{ task.owner }} &middot; {{ task.points }} point(s)</small>
+                  </div>
+                </article>
+                {% endfor %}
+              </div>
+            </details>
           </div>
         </section>
         <section class="si-wide-card">
@@ -447,58 +895,212 @@
           </div>
         </section>
 
-        {% elif page.slug in ["content-optimization", "duplicate-content"] %}
+        {% elif page.slug == "content-optimization" %}
         <section class="si-wide-card">
           <div class="si-card-head">
-            <h2>{{ page.title }}</h2>
-            <span>Connector needed</span>
+            <h2>Content optimization overview</h2>
+            <span>{{ content_optimization.status }} &middot; {{ content_optimization.pages }} HTML page(s)</span>
           </div>
-          <p class="si-empty">This Siteimprove-style SEO feature needs a content index, keyword source, or search-console connector. The module is represented so it can be wired without changing navigation later.</p>
+          <div class="si-content-scoreboard">
+            <article class="si-content-score"><span>Content score</span><strong>{{ content_optimization.score }}</strong><small>/100 based on crawl checks</small></article>
+            <article><span>Needs attention</span><strong>{{ content_optimization.needs_attention }}</strong><small>{{ content_optimization.healthy_pages }} page(s) passed</small></article>
+            <article><span>Thin pages</span><strong>{{ content_optimization.thin_pages }}</strong><small>Fewer than 150 measured words</small></article>
+            <article><span>Missing metadata</span><strong>{{ content_optimization.missing_metadata_pages }}</strong><small>Missing title or description</small></article>
+          </div>
+          <div class="si-content-method">
+            <strong>What is checked</strong>
+            <span>Title length</span><span>Meta description</span><span>H1 count</span><span>Measured word count</span>
+          </div>
+        </section>
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>Pages to improve</h2>
+            <a href="/api/content-optimization?site={{ selected_site_key }}" target="_blank" rel="noreferrer">JSON API</a>
+          </div>
+          {% if content_optimization.rows %}
+          <div class="si-content-page-list">
+            {% for item in content_optimization.rows %}
+            <article>
+              <div class="si-content-page-head">
+                <div><span>{{ item.priority }} &middot; {{ item.issue_count }} issue(s)</span><h3>{{ item.title }}</h3><a href="{{ item.url }}" target="_blank" rel="noreferrer">{{ item.url }}</a></div>
+                <dl><dt>Words</dt><dd>{{ item.word_count or 'Not measured' }}</dd><dt>H1s</dt><dd>{{ item.h1_count }}</dd></dl>
+              </div>
+              <div class="si-content-fix-list">
+                {% for issue in item.issues %}
+                <div><strong>{{ issue.label }}</strong><p>{{ issue.action }}</p></div>
+                {% endfor %}
+              </div>
+              <form class="si-content-plan-form" method="post" action="/api/content-actions">
+                <input type="hidden" name="site" value="{{ selected_site_key }}"><input type="hidden" name="action_type" value="content-optimization">
+                <input type="hidden" name="title" value="{{ item.action_title }}"><input type="hidden" name="primary_url" value="{{ item.url }}">
+                <input type="hidden" name="affected_urls" value="{{ item.url }}"><input type="hidden" name="status" value="accepted"><input type="hidden" name="points" value="{{ item.points }}"><input type="hidden" name="note" value="{{ item.action_note }}">
+                <button class="si-button-primary" type="submit">Add page to activity plan</button><span>{{ item.points }} priority points</span>
+              </form>
+            </article>
+            {% endfor %}
+          </div>
+          {% else %}
+          <div class="si-activity-empty"><strong>{{ 'No content issues found' if content_optimization.pages else 'Run a crawl first' }}</strong><p>{{ 'The measured pages passed the current content checks.' if content_optimization.pages else 'A content or full scan will populate page titles, metadata, H1 counts and word counts.' }}</p></div>
+          {% endif %}
         </section>
 
-        {% elif page.slug in ["robots-indexing", "structured-data"] %}
-        {% set rows = lighthouse.crawler_summary.robots if page.slug == "robots-indexing" else lighthouse.crawler_summary.structured %}
+        {% elif page.slug == "duplicate-content" %}
         <section class="si-wide-card">
           <div class="si-card-head">
-            <h2>{{ page.title }}</h2>
-            <span>{{ rows|length }} checks</span>
+            <h2>Duplicate content overview</h2>
+            <span>{{ duplicate_content.status }} &middot; Metadata and body similarity</span>
           </div>
+          <div class="si-content-scoreboard">
+            <article class="si-content-score"><span>Uniqueness score</span><strong>{{ duplicate_content.score }}</strong><small>/100 across crawled pages</small></article>
+            <article><span>Affected pages</span><strong>{{ duplicate_content.affected_pages }}</strong><small>Out of {{ duplicate_content.pages }} page(s)</small></article>
+            <article><span>Duplicate titles</span><strong>{{ duplicate_content.duplicate_title_groups }}</strong><small>Exact title group(s)</small></article>
+            <article><span>Duplicate descriptions</span><strong>{{ duplicate_content.duplicate_meta_groups }}</strong><small>Exact Meta group(s)</small></article>
+          </div>
+          <div class="si-content-method">
+            <strong>Detection scope</strong>
+            <span>Exact titles: Live</span><span>Exact Meta descriptions: Live</span><span>Exact body groups: {{ duplicate_content.exact_body_groups }}</span><span>Near-duplicate body groups: {{ duplicate_content.near_body_groups }}</span><span>Body similarity: {{ duplicate_content.body_similarity_status }}</span>
+          </div>
+        </section>
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <h2>Duplicate groups</h2>
+            <a href="/api/duplicate-content?site={{ selected_site_key }}" target="_blank" rel="noreferrer">JSON API</a>
+          </div>
+          {% if duplicate_content.groups %}
+          <div class="si-duplicate-list">
+            {% for group in duplicate_content.groups %}
+            <article>
+              <div class="si-duplicate-head"><span>{{ group.risk }} risk &middot; {{ group.label }}</span><strong>{{ group.count }} pages &middot; {{ group.points }} points</strong></div>
+              <blockquote>{{ group.value }}</blockquote>
+              <div class="si-duplicate-decision">
+                <div class="si-duplicate-primary">
+                  <span>Suggested primary page</span>
+                  <strong>{{ group.primary_page.title }}</strong>
+                  <a href="{{ group.primary_page.url }}" target="_blank" rel="noreferrer">{{ group.primary_page.url }}</a>
+                  <small>{{ group.primary_page.word_count }} words &middot; {{ group.similarity }}</small>
+                </div>
+                <div>
+                  <span>Recommended action</span>
+                  <p>{{ group.action }}</p>
+                  <small>{{ group.decision_note }}</small>
+                </div>
+              </div>
+              <form class="si-duplicate-plan-form" method="post" action="/api/content-actions">
+                <input type="hidden" name="site" value="{{ selected_site_key }}"><input type="hidden" name="action_type" value="duplicate-content">
+                <input type="hidden" name="title" value="Resolve {{ group.label }} across {{ group.count }} pages"><input type="hidden" name="primary_url" value="{{ group.primary_page.url }}">
+                <input type="hidden" name="affected_urls" value="{{ group.pages|join('|') }}"><input type="hidden" name="status" value="accepted"><input type="hidden" name="points" value="{{ group.points }}"><input type="hidden" name="note" value="{{ group.action }}">
+                <button class="si-button-primary" type="submit">Add to activity plan</button><a class="si-button-secondary" href="/modules/activity-plans?site={{ selected_site_key }}">Open activity plan</a>
+              </form>
+              <details open><summary>Pages to review ({{ group.duplicate_pages|length }})</summary><div class="si-duplicate-pages">{% for page in group.duplicate_pages %}<section><a href="{{ page.url }}" target="_blank" rel="noreferrer">{{ page.title }}</a><small>{{ page.url }} &middot; {{ page.word_count }} words</small><p>{{ page.recommendation }}</p></section>{% endfor %}</div></details>
+            </article>
+            {% endfor %}
+          </div>
+          {% else %}
+          <div class="si-activity-empty"><strong>{{ 'No duplicate groups found' if duplicate_content.pages else 'Run a crawl first' }}</strong><p>{{ 'Titles, Meta descriptions, and available body fingerprints are unique in the current inventory.' if duplicate_content.pages else 'A content or full scan will create the inventory needed for duplicate checks.' }}</p></div>
+          {% endif %}
+        </section>
+
+        {% elif page.slug in ["robots-indexing", "structured-data", "security-headers"] %}
+        <section class="si-wide-card">
+          <div class="si-card-head">
+            <div><h2>{{ page.title }}</h2><span>{{ technical_crawl.status }} &middot; {{ technical_crawl.totals.pages }} crawled HTML page(s)</span></div>
+            <a href="/scans?site={{ selected_site_key }}">Run content scan</a>
+          </div>
+          {% if page.slug == "robots-indexing" %}
+          <div class="si-content-scoreboard">
+            <article><span>Indexable pages</span><strong>{{ technical_crawl.totals.indexable }}</strong><small>{{ technical_crawl.totals.pages - technical_crawl.totals.indexable }} excluded from search</small></article>
+            <article><span>Canonical coverage</span><strong>{{ technical_crawl.coverage.canonical }}%</strong><small>{{ technical_crawl.totals.canonical }} of {{ technical_crawl.totals.pages }} pages</small></article>
+            <article><span>Technical issues</span><strong>{{ technical_crawl.issue_count }}</strong><small>Open SEO and security findings</small></article>
+          </div>
+          {% elif page.slug == "structured-data" %}
+          <div class="si-content-scoreboard">
+            <article><span>Schema coverage</span><strong>{{ technical_crawl.coverage.structured }}%</strong><small>{{ technical_crawl.totals.structured }} page(s) with JSON-LD</small></article>
+            <article><span>Social preview coverage</span><strong>{{ technical_crawl.coverage.open_graph }}%</strong><small>Complete Open Graph metadata</small></article>
+            <article><span>Schema types</span><strong>{{ technical_crawl.schema_types|length }}</strong><small>Distinct @type values detected</small></article>
+          </div>
+          {% else %}
+          <div class="si-content-scoreboard">
+            <article><span>HTTPS protection</span><strong>{{ technical_crawl.coverage.hsts }}%</strong><small>Strict-Transport-Security</small></article>
+            <article><span>Content policy</span><strong>{{ technical_crawl.coverage.csp }}%</strong><small>Content-Security-Policy</small></article>
+            <article><span>MIME protection</span><strong>{{ technical_crawl.coverage.nosniff }}%</strong><small>X-Content-Type-Options</small></article>
+            <article><span>Referrer privacy</span><strong>{{ technical_crawl.coverage.referrer }}%</strong><small>Referrer-Policy</small></article>
+          </div>
+          {% endif %}
+        </section>
+        <section class="si-wide-card">
+          <div class="si-card-head"><h2>Page-level checks</h2><span>Use this list to see exactly where to make changes</span></div>
+          {% if technical_crawl.rows %}
           <div class="si-analytics-table">
             <div class="si-analytics-row si-analytics-head">
-              <span>Check</span><span>Status</span><span>Value</span><span>Detail</span>
+              <span>Page</span>
+              {% if page.slug == "robots-indexing" %}<span>Indexing</span><span>Canonical</span><span>Action</span>
+              {% elif page.slug == "structured-data" %}<span>Schema</span><span>Social preview</span><span>Action</span>
+              {% else %}<span>HSTS / CSP</span><span>Nosniff / Referrer</span><span>Action</span>{% endif %}
             </div>
-            {% for check in rows %}
+            {% for item in technical_crawl.rows %}
             <div class="si-analytics-row">
-              <strong>{{ check.name }}</strong><span>{{ check.status }}</span><span>{{ check.value or "-" }}</span><span>{{ check.detail }}</span>
+              <strong>{{ item.title }}<small>{{ item.url }}</small></strong>
+              {% if page.slug == "robots-indexing" %}
+              <span>{{ "Indexable" if item.indexable else "Noindex" }}</span><span>{{ "Valid" if item.canonical_ok else item.canonical }}</span><span>{{ "No change needed" if item.canonical_ok else "Add or correct the canonical link" }}</span>
+              {% elif page.slug == "structured-data" %}
+              <span>{{ item.schema_types|join(", ") if item.schema_types else "No schema" }}{% if item.invalid_json_ld %} &middot; invalid JSON{% endif %}</span><span>{{ "Complete" if item.open_graph_ok else "Incomplete" }}</span><span>{{ "Fix invalid JSON-LD" if item.invalid_json_ld else "Add relevant schema where it helps users" if not item.schema_types else "Validate after content changes" }}</span>
+              {% else %}
+              <span>{{ "Pass" if item.headers.strict_transport_security else "Missing" }} / {{ "Pass" if item.headers.content_security_policy else "Missing" }}</span><span>{{ "Pass" if item.headers.x_content_type_options else "Missing" }} / {{ "Pass" if item.headers.referrer_policy else "Missing" }}</span><span>Configure response headers at the web server or CDN</span>
+              {% endif %}
             </div>
             {% endfor %}
           </div>
+          {% else %}<div class="si-activity-empty"><strong>No crawl data yet</strong><p>Run a Content or Full audit to inspect every discovered page.</p></div>{% endif %}
         </section>
 
         {% elif page.slug == "sitemaps" %}
         <section class="si-wide-card">
           <div class="si-card-head">
-            <h2>Sitemaps</h2>
+            <div><h2>Sitemaps</h2><span>Discovery source for full-site scanning and SEO coverage</span></div>
             <span class="si-status si-status-{{ lighthouse.crawler_summary.sitemaps.status|lower|replace(' ', '-') }}">{{ lighthouse.crawler_summary.sitemaps.status }}</span>
           </div>
+          {% if lighthouse.crawler_summary.sitemaps.status == "Run needed" %}
+          <div class="si-sitemap-empty">
+            <div>
+              <span>Start here</span>
+              <h3>No sitemap data has been loaded for this website yet</h3>
+              <p>Run a Content or Full scan to discover pages automatically, or run the sitemap crawler when you specifically want the XML sitemap files listed here.</p>
+            </div>
+            <div class="si-sitemap-actions">
+              <a class="si-button-primary" href="/scans?site={{ selected_site_key }}">Run scan</a>
+              <code>{{ lighthouse.crawler_summary.sitemaps.script_command }}</code>
+            </div>
+          </div>
+          {% endif %}
           <div class="si-module-grid">
             <article>
               <h3>Discovered pages</h3>
-              <p>{{ lighthouse.crawler_summary.sitemaps.url_count }} URL(s) from {{ lighthouse.crawler_summary.sitemaps.sitemap_count }} sitemap file(s).</p>
+              <p>{{ lighthouse.crawler_summary.sitemaps.url_count }} URL(s) from {{ lighthouse.crawler_summary.sitemaps.source_label|lower }}{% if lighthouse.crawler_summary.sitemaps.sitemap_count != "0" %} across {{ lighthouse.crawler_summary.sitemaps.sitemap_count }} sitemap file(s){% endif %}.</p>
             </article>
             <article>
               <h3>Sitemap source</h3>
-              <p>{{ lighthouse.crawler_summary.sitemaps.source or "Run the sitemap crawler to detect sitemap.xml" }}</p>
+              <p>{{ lighthouse.crawler_summary.sitemaps.source or lighthouse.crawler_summary.sitemaps.inventory_pages ~ " page(s) from crawl inventory. Run sitemap crawler for XML file breakdown." }}</p>
             </article>
             <article>
               <h3>Errors</h3>
               <p>{{ lighthouse.crawler_summary.sitemaps.error_count }} issue(s). {{ lighthouse.crawler_summary.sitemaps.next_step }}</p>
             </article>
           </div>
+          {% if lighthouse.crawler_summary.sitemaps.sitemap_files %}
+          <div class="si-sitemap-files">
+            <div class="si-card-head"><h3>Sitemap files</h3><span>These are the XML feeds discovered from sitemap.xml</span></div>
+            <div class="si-report-grid">
+              {% for sitemap_file in lighthouse.crawler_summary.sitemaps.sitemap_files %}
+              <a href="{{ sitemap_file.url }}" target="_blank" rel="noreferrer"><strong>{{ sitemap_file.kind }}</strong><span>{{ sitemap_file.url }}</span><small>Open XML</small></a>
+              {% endfor %}
+            </div>
+          </div>
+          {% endif %}
           {% if lighthouse.crawler_summary.sitemaps.sample_pages %}
+          <div class="si-card-head si-subsection-head"><h3>Discovered page sample</h3><span>Use these pages as scan targets and spot-check sitemap coverage</span></div>
           <div class="si-analytics-table">
             <div class="si-analytics-row si-analytics-head">
-              <span>Discovered URL</span><span>Last modified</span><span>Change freq</span><span>Priority</span>
+              <span>Discovered URL</span><span>Last modified</span><span>Source / frequency</span><span>Priority</span>
             </div>
             {% for page_item in lighthouse.crawler_summary.sitemaps.sample_pages %}
             <div class="si-analytics-row">
@@ -523,43 +1125,46 @@
             {% for report in lighthouse.crawler_summary.sitemaps.reports %}
             <a href="{{ report.href }}" target="_blank" rel="noreferrer"><strong>{{ report.kind }}</strong><span>{{ report.name }}</span><small>{{ report.updated }}</small></a>
             {% else %}
-            <p class="si-empty">No sitemap report yet.</p>
+            <p class="si-empty">No sitemap JSON report yet. A Content or Full scan can still populate the crawl inventory; the sitemap crawler adds the XML file breakdown.</p>
             {% endfor %}
           </div>
         </section>
 
         {% elif page.slug in ["content-quality", "spelling-readability"] %}
-        <section class="si-wide-card">
+        <section class="si-content-hero">
+          <article>
+            <span>Content quality score</span>
+            <strong>{{ content_governance.score }}<small>/100</small></strong>
+            <p>{{ content_governance.status }}</p>
+          </article>
+          <article><span>Open issues</span><strong>{{ content_governance.issue_count }}</strong><p>Prioritized editorial findings</p></article>
+          <article><span>Affected pages</span><strong>{{ content_governance.affected_pages }}</strong><p>Across {{ content_governance.scanned_pages }} indexed HTML pages</p></article>
+          <article><span>Next layer</span><strong>Policy</strong><p>LanguageTool or Vale for spelling and tone</p></article>
+        </section>
+        <section class="si-wide-card si-content-governance">
           <div class="si-card-head">
-            <h2>{{ page.title }}</h2>
-            <span class="si-status si-status-{{ lighthouse.content_quality.status|lower|replace(' ', '-') }}">{{ lighthouse.content_quality.status }}</span>
+            <div><h2>{{ page.title }}</h2><span>Whole-site metadata, structure, duplication, and content-depth checks</span></div>
+            <a href="/scans?site={{ selected_site_key }}">Run content scan</a>
           </div>
-          <div class="si-module-grid">
-            <article>
-              <h3>Content checks</h3>
-              <dl>
-                <dt>Open issues</dt><dd>{{ lighthouse.content_quality.issue_count }}</dd>
-                <dt>Source</dt><dd>Lighthouse + accessibility audit</dd>
-                <dt>Next connector</dt><dd>Vale / LanguageTool / textlint</dd>
-              </dl>
-            </article>
-            <article>
-              <h3>Editorial governance</h3>
-              <p>{{ lighthouse.content_quality.connector_note }}</p>
-            </article>
-            <article>
-              <h3>Publishing fit</h3>
-              <p>Use this page as the bridge between page quality issues and Drupal/SDP prepublish workflows.</p>
-            </article>
+          <div class="si-content-checks">
+            {% for check in content_governance.checks %}
+            <article class="{{ 'passed' if check.status == 'Passed' else 'attention' }}"><span>{{ check.name }}</span><strong>{{ check.count }}</strong><small>{{ check.status }}</small></article>
+            {% endfor %}
           </div>
-          <div class="si-analytics-table">
-            <div class="si-analytics-row si-analytics-head">
-              <span>Check</span><span>Status</span><span>Value</span><span>Detail</span>
+          <div class="si-content-table">
+            <div class="si-content-row si-content-head">
+              <span>Finding</span><span>Priority</span><span>Pages</span><span>Points</span><span>First affected page</span>
             </div>
-            {% for check in lighthouse.content_quality.checks %}
-            <div class="si-analytics-row">
-              <strong>{{ check.name }}</strong><span>{{ check.status }}</span><span>{{ check.value or "-" }}</span><span>{{ check.detail }}</span>
-            </div>
+            {% for issue in content_governance.rows %}
+            <article class="si-content-row">
+              <strong>{{ issue.title }}<small>{{ issue.audit_id|replace('content-', '')|replace('-', ' ')|title }}</small></strong>
+              <span class="priority-{{ issue.priority }}">{{ issue.priority|title }}</span>
+              <span>{{ issue.affected_pages }}</span>
+              <span>{{ '%.1f'|format(issue.points) }}</span>
+              {% if issue.page_href %}<a href="{{ issue.page_href }}">{{ issue.page_url }}</a>{% else %}<span>-</span>{% endif %}
+            </article>
+            {% else %}
+            <div class="si-content-empty"><strong>{{ "No content quality issues detected" if content_governance.scanned_pages else "No content index yet" }}</strong><p>{{ content_governance.connector_note }}</p></div>
             {% endfor %}
           </div>
         </section>
@@ -581,7 +1186,7 @@
               </div>
               <span>HTTP {{ page_item.status_code or "-" }}</span>
               <span>Depth {{ page_item.depth }}</span>
-              <span>{{ page_item.source|replace('-', ' ')|title }}</span>
+              <a href="/pages/inspect?site={{ selected_site_key }}&url={{ page_item.url|urlencode }}">Inspect page</a>
             </article>
             {% endfor %}
             {% elif lighthouse.pages_with_issues %}
@@ -641,13 +1246,26 @@
         {% elif page.slug == "broken-links" %}
         <section class="si-wide-card">
           <div class="si-card-head">
-            <h2>Broken links</h2>
+            <div><h2>Broken links</h2><span>{{ lighthouse.link_integrity.source_label }} &middot; link and page reachability checks</span></div>
             <span class="si-status si-status-{{ lighthouse.link_integrity.status|lower|replace(' ', '-') }}">{{ lighthouse.link_integrity.status }}</span>
           </div>
+          {% if lighthouse.link_integrity.status in ["Run needed", "Inventory available"] %}
+          <div class="si-sitemap-empty">
+            <div>
+              <span>Recommended next step</span>
+              <h3>{{ "Run LinkChecker for full link-level coverage" if lighthouse.link_integrity.status == "Inventory available" else "No LinkChecker report for this website yet" }}</h3>
+              <p>The crawl inventory can catch unreachable pages, but LinkChecker is needed to inspect every internal and external link on those pages.</p>
+            </div>
+            <div class="si-sitemap-actions">
+              <a class="si-button-primary" href="/scans?site={{ selected_site_key }}">Run scan</a>
+              <code>powershell -ExecutionPolicy Bypass -File .\scripts\run-linkcheck.ps1 -TargetUrl {{ selected_site.url }}</code>
+            </div>
+          </div>
+          {% endif %}
           <div class="si-module-grid">
             <article>
               <h3>Checked links</h3>
-              <p>{{ lighthouse.link_integrity.checked_count }} link(s) checked in the latest report.</p>
+              <p>{{ lighthouse.link_integrity.checked_count }} record(s) checked from {{ lighthouse.link_integrity.source_label|lower }}.</p>
             </article>
             <article>
               <h3>Errors</h3>
@@ -665,6 +1283,34 @@
             </article>
             {% endfor %}
           </div>
+          {% if lighthouse.link_integrity.inventory_findings %}
+          <div class="si-card-head si-subsection-head"><h3>Reachability findings from crawl inventory</h3><span>These are page-level HTTP errors; run LinkChecker for full link-level source pages</span></div>
+          <div class="si-analytics-table">
+            <div class="si-analytics-row si-analytics-head">
+              <span>URL</span><span>Status</span><span>Severity</span><span>Actions</span>
+            </div>
+            {% for finding in lighthouse.link_integrity.inventory_findings %}
+            <div class="si-analytics-row si-link-finding-row">
+              <strong><a href="{{ finding.url }}" target="_blank" rel="noreferrer">{{ finding.url }}</a><small>{{ finding.source }} &middot; {{ finding.action }}</small></strong>
+              <span>{{ finding.status }}</span>
+              <span>{{ finding.severity }}</span>
+              <span class="si-row-actions">
+                <a class="si-mini-button" href="{{ finding.url }}" target="_blank" rel="noreferrer">Open</a>
+                <a class="si-mini-button" href="/pages/inspect?site={{ selected_site_key }}&url={{ finding.url|urlencode }}">Inspect</a>
+                <button class="si-mini-button" type="button" data-copy-text="{{ finding.url|e }}">Copy URL</button>
+              </span>
+              <details class="si-link-fix-details">
+                <summary>How to fix this</summary>
+                <ol>
+                  {% for step in finding.fix_steps %}
+                  <li>{{ step }}</li>
+                  {% endfor %}
+                </ol>
+              </details>
+            </div>
+            {% endfor %}
+          </div>
+          {% endif %}
           {% if lighthouse.link_integrity.sample_errors %}
           <div class="si-analytics-table">
             <div class="si-analytics-row si-analytics-head">

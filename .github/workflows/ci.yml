@@ -26,6 +26,13 @@ jobs:
         run: node --check services/portal/static/app.js
       - name: Run tests
         run: python -m unittest discover -s tests -v
+      - name: Verify database migrations
+        working-directory: services/portal
+        env:
+          DATABASE_URL: sqlite:///../../migration-ci.db
+        run: |
+          alembic -c alembic.ini upgrade head
+          alembic -c alembic.ini current
       - name: Validate Docker Compose
         run: docker compose config --quiet
       - name: Check committed runtime data

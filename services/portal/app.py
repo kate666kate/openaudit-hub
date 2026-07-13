@@ -5,7 +5,9 @@ import json
 import re
 import csv
 import io
+import time
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from datetime import timedelta
 from pathlib import Path
@@ -28,6 +30,9 @@ try:
         get_scan_job,
         get_website,
         init_database,
+        keyword_action_key,
+        list_content_actions,
+        list_keyword_actions,
         list_issues as database_issues,
         list_issues_for_page,
         list_crawl_pages,
@@ -35,6 +40,8 @@ try:
         list_websites,
         reconcile_issues,
         update_issue_status,
+        upsert_content_action,
+        upsert_keyword_action,
         update_scan_job,
         update_website,
     )
@@ -48,6 +55,9 @@ except ImportError:
         get_scan_job,
         get_website,
         init_database,
+        keyword_action_key,
+        list_content_actions,
+        list_keyword_actions,
         list_issues as database_issues,
         list_issues_for_page,
         list_crawl_pages,
@@ -55,6 +65,8 @@ except ImportError:
         list_websites,
         reconcile_issues,
         update_issue_status,
+        upsert_content_action,
+        upsert_keyword_action,
         update_scan_job,
         update_website,
     )
@@ -86,7 +98,18 @@ SEARCH_CONSOLE_DIRS = [
     WORKSPACE_DIR / "config" / "search-console",
     WORKSPACE_DIR / "outputs" / "search-console",
 ]
+MAX_SEARCH_CONSOLE_UPLOAD_BYTES = 2 * 1024 * 1024
+MAX_SEARCH_CONSOLE_ROWS = 20_000
 _LIGHTHOUSE_SUMMARY_CACHE: dict[str, Any] = {}
+_PAGE_HTML_CACHE: dict[str, tuple[float, str]] = {}
+SCAN_TYPES = {"full", "accessibility", "content", "lighthouse"}
+
+
+def validated_scan_type(value: str) -> str:
+    scan_type = str(value or "full").strip().lower()
+    if scan_type not in SCAN_TYPES:
+        raise ValueError(f"Invalid scan type. Choose one of: {', '.join(sorted(SCAN_TYPES))}.")
+    return scan_type
 
 
 def create_app() -> Flask:
@@ -168,6 +191,11 @@ def create_app() -> Flask:
                         "schedule": request.form.get("schedule", "manual"),
                         "max_pages": request.form.get("max_pages", "100"),
                         "exclude_paths": request.form.get("exclude_paths", ""),
+                        "budget_performance": request.form.get("budget_performance", "70"),
+                        "budget_accessibility": request.form.get("budget_accessibility", "80"),
+                        "budget_seo": request.form.get("budget_seo", "80"),
+                        "budget_lcp_ms": request.form.get("budget_lcp_ms", "2500"),
+                        "budget_cls": request.form.get("budget_cls", "0.1"),
                     }
                 )
                 return redirect(f"/websites?created={quote(website['key'], safe='')}")
@@ -195,6 +223,11 @@ def create_app() -> Flask:
                 "schedule": request.form.get("schedule", "manual"),
                 "max_pages": request.form.get("max_pages", "100"),
                 "exclude_paths": request.form.get("exclude_paths", ""),
+                "budget_performance": request.form.get("budget_performance", "70"),
+                "budget_accessibility": request.form.get("budget_accessibility", "80"),
+                "budget_seo": request.form.get("budget_seo", "80"),
+                "budget_lcp_ms": request.form.get("budget_lcp_ms", "2500"),
+                "budget_cls": request.form.get("budget_cls", "0.1"),
             },
         )
         return redirect(f"/websites?updated={quote(key, safe='')}")
@@ -229,6 +262,7 @@ def create_app() -> Flask:
             scan_type = request.form.get("scan_type", "full").strip()
             job = None
             try:
+                scan_type = validated_scan_type(scan_type)
                 job = create_scan_job(website_key_value, scan_type)
                 task_id = enqueue_scan(str(job["id"]))
                 update_scan_job(str(job["id"]), task_id=task_id, message="Waiting for a scan worker.")
@@ -254,7 +288,8 @@ def create_app() -> Flask:
         payload = request.get_json(silent=True) or {}
         job = None
         try:
-            job = create_scan_job(str(payload.get("website_key") or ""), str(payload.get("scan_type") or "full"))
+            scan_type = validated_scan_type(str(payload.get("scan_type") or "full"))
+            job = create_scan_job(str(payload.get("website_key") or ""), scan_type)
             task_id = enqueue_scan(str(job["id"]))
             job = update_scan_job(str(job["id"]), task_id=task_id, message="Waiting for a scan worker.") or job
             return jsonify(job), 202
@@ -309,6 +344,7 @@ def create_app() -> Flask:
         target = "/modules/issues"
         if site_key_value:
             target += f"?site={quote(site_key_value, safe='')}"
+        target = activity_plan_return_target(request.form.get("return_to", ""), target)
         return redirect(target)
 
     @app.route("/api/lhci")
@@ -378,7 +414,7 @@ def create_app() -> Flask:
     @app.route("/api/issues")
     def issues():
         site = resolve_requested_site_url()
-        summary = load_lighthouse_report_summary(site)
+        summary = load_lighthouse_report_summary(site, include_keywords=False)
         return jsonify(
             {
                 "issues_to_fix": summary.get("issues_to_fix", []),
@@ -390,7 +426,7 @@ def create_app() -> Flask:
     @app.route("/api/action-plan")
     def action_plan():
         site = resolve_requested_site_url()
-        summary = load_lighthouse_report_summary(site)
+        summary = load_lighthouse_report_summary(site, include_keywords=False)
         return jsonify(
             {
                 "website": site_label(site or str(summary.get("final_url", ""))),
@@ -402,7 +438,7 @@ def create_app() -> Flask:
     @app.route("/api/standards")
     def standards():
         site = resolve_requested_site_url()
-        summary = load_lighthouse_report_summary(site)
+        summary = load_lighthouse_report_summary(site, include_keywords=False)
         return jsonify(
             {
                 "standards_engine": summary.get("standards_engine", {}),
@@ -415,7 +451,7 @@ def create_app() -> Flask:
     @app.route("/api/modules")
     def modules():
         site = resolve_requested_site_url()
-        summary = load_lighthouse_report_summary(site)
+        summary = load_lighthouse_report_summary(site, include_keywords=False)
         return jsonify(
             {
                 "feature_modules": summary.get("feature_modules", []),
@@ -445,7 +481,7 @@ def create_app() -> Flask:
     @app.route("/api/keyword-suggestions/export.csv")
     def keyword_suggestions_export():
         site = resolve_requested_site_url()
-        summary = load_lighthouse_report_summary(site)
+        summary = load_lighthouse_report_summary(site, include_keywords=True)
         keywords = summary.get("keyword_suggestions", {})
         output = io.StringIO()
         writer = csv.writer(output)
@@ -497,6 +533,174 @@ def create_app() -> Flask:
             headers={"Content-Disposition": f"attachment; filename={filename}"},
         )
 
+    @app.post("/api/search-console/import")
+    def search_console_import():
+        requested_key = str(request.form.get("site") or "").strip()
+        selected_site = next(
+            (site for site in load_site_options() if site.get("key") == requested_key),
+            None,
+        )
+        target = f"/modules/keyword-suggestions?site={quote(requested_key, safe='')}"
+        if not selected_site:
+            return redirect(f"{target}&gsc=error&message={quote('Choose a valid website first.')}")
+
+        upload = request.files.get("search_console_csv")
+        if not upload or not str(upload.filename or "").lower().endswith(".csv"):
+            return redirect(f"{target}&gsc=error&message={quote('Choose a Google Search Console CSV file.')}")
+
+        try:
+            result = import_search_console_csv(upload, selected_site)
+        except ValueError as exc:
+            message = compact_text(str(exc), 180)
+            return redirect(f"{target}&gsc=error&message={quote(message)}")
+
+        _LIGHTHOUSE_SUMMARY_CACHE.clear()
+        return redirect(
+            f"{target}&gsc=imported&rows={result['rows']}&skipped={result['skipped']}"
+        )
+
+    @app.route("/api/keyword-actions", methods=["GET", "POST"])
+    def keyword_actions_api():
+        if request.method == "GET":
+            site = select_site(load_site_options())
+            site_key_value = str(site.get("key") or "")
+            return jsonify(list_keyword_actions(site_key_value) if site_key_value else [])
+
+        payload = request.get_json(silent=True) if request.is_json else request.form
+        payload = payload or {}
+        site_key_value = str(payload.get("site") or "").strip()
+        selected_site = next(
+            (site for site in load_site_options() if site.get("key") == site_key_value),
+            None,
+        )
+        target = f"/modules/keyword-suggestions?site={quote(site_key_value, safe='')}"
+        target = activity_plan_return_target(str(payload.get("return_to") or ""), target)
+        if not selected_site:
+            message = "Choose a valid website first."
+            if request.is_json:
+                return jsonify({"error": message}), 400
+            return redirect(f"{target}&workflow=error&message={quote(message)}")
+
+        page_url = str(payload.get("page_url") or "").strip()
+        expected_host = site_label(str(selected_site.get("url") or "")).lower().replace("www.", "")
+        page_host = site_label(page_url).lower().replace("www.", "") if page_url else ""
+        if not page_host or page_host != expected_host:
+            message = "The task page must belong to the selected website."
+            if request.is_json:
+                return jsonify({"error": message}), 400
+            return redirect(f"{target}&workflow=error&message={quote(message)}")
+
+        try:
+            action = upsert_keyword_action(
+                site_key_value,
+                page_url,
+                str(payload.get("keyword") or ""),
+                str(payload.get("decision") or "Improve existing page"),
+                str(payload.get("status") or "suggested"),
+                str(payload.get("owner") or ""),
+                str(payload.get("note") or ""),
+            )
+        except ValueError as exc:
+            if request.is_json:
+                return jsonify({"error": str(exc)}), 400
+            return redirect(f"{target}&workflow=error&message={quote(compact_text(str(exc), 180))}")
+
+        _LIGHTHOUSE_SUMMARY_CACHE.clear()
+        if request.is_json:
+            return jsonify(action)
+        return redirect(f"{target}&workflow=saved")
+
+    @app.route("/api/content-actions", methods=["GET", "POST"])
+    def content_actions_api():
+        payload = request.get_json(silent=True) if request.is_json else request.form
+        payload = payload or {}
+        site_key_value = str(payload.get("site") or request.args.get("site") or "").strip()
+        if request.method == "GET":
+            return jsonify(list_content_actions(site_key_value) if site_key_value else [])
+        selected = next((site for site in load_site_options() if site.get("key") == site_key_value), None)
+        action_type = str(payload.get("action_type") or "duplicate-content")
+        module_slug = "content-optimization" if action_type == "content-optimization" else "duplicate-content"
+        target = activity_plan_return_target(str(payload.get("return_to") or ""), f"/modules/{module_slug}?site={quote(site_key_value, safe='')}")
+        if not selected:
+            return jsonify({"error": "Choose a valid website first."}), 400
+        primary_url = str(payload.get("primary_url") or "").strip()
+        if site_key(primary_url) != site_key(str(selected.get("url") or "")):
+            return jsonify({"error": "The primary page must belong to the selected website."}), 400
+        affected_urls = list(dict.fromkeys(url.strip() for url in str(payload.get("affected_urls") or "").split("|") if url.strip()))[:100]
+        selected_key = site_key(str(selected.get("url") or ""))
+        if any(site_key(url) != selected_key for url in affected_urls):
+            return jsonify({"error": "Every affected page must belong to the selected website."}), 400
+        try:
+            action = upsert_content_action(
+                site_key_value, action_type,
+                str(payload.get("title") or "Resolve duplicate content"), primary_url,
+                affected_urls, str(payload.get("status") or "suggested"),
+                str(payload.get("owner") or ""), str(payload.get("note") or ""),
+                float(payload.get("points") or 0),
+            )
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        if request.is_json:
+            return jsonify(action)
+        return redirect(f"{target}&workflow=saved")
+
+    @app.get("/api/activity-plans")
+    def activity_plans_api():
+        selected_site = select_site(load_site_options())
+        selected_site_key = str(selected_site.get("key") or "")
+        selected_site_url = str(selected_site.get("url") or "")
+        if not selected_site_key or not selected_site_url:
+            return jsonify({"rows": [], "total": 0})
+        summary = load_lighthouse_report_summary(selected_site_url)
+        center = build_activity_plan_center(
+            summary.get("keyword_suggestions", {}).get("page_edit_queue", []),
+            database_issues(selected_site_key),
+            request.args.get("status", "all").strip(),
+            list_keyword_actions(selected_site_key),
+            list_content_actions(selected_site_key),
+        )
+        return jsonify(center)
+
+    @app.get("/api/activity-plans/export.csv")
+    def activity_plans_export():
+        selected_site = select_site(load_site_options())
+        selected_site_key = str(selected_site.get("key") or "")
+        selected_site_url = str(selected_site.get("url") or "")
+        if not selected_site_key or not selected_site_url:
+            return Response("No website selected.\n", status=400, mimetype="text/plain")
+        summary = load_lighthouse_report_summary(selected_site_url)
+        center = build_activity_plan_center(
+            summary.get("keyword_suggestions", {}).get("page_edit_queue", []),
+            database_issues(selected_site_key), "all",
+            list_keyword_actions(selected_site_key), list_content_actions(selected_site_key),
+        )
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["website", "work_type", "title", "status", "priority", "points", "owner", "page", "note", "updated"])
+        for row in center["rows"]:
+            writer.writerow([csv_cell(value) for value in (
+                selected_site.get("label") or site_label(selected_site_url), row.get("kind", ""),
+                row.get("title", ""), row.get("status", ""), row.get("priority", ""),
+                row.get("points", ""), row.get("owner", ""), row.get("page_url", ""),
+                row.get("note", ""), row.get("updated_at", ""),
+            )])
+        filename = f"activity-plan-{selected_site_key}.csv"
+        return Response(output.getvalue(), mimetype="text/csv", headers={"Content-Disposition": f"attachment; filename={filename}"})
+
+    @app.get("/api/content-optimization")
+    def content_optimization_api():
+        selected_site = select_site(load_site_options())
+        selected_site_key = str(selected_site.get("key") or "")
+        pages = list_crawl_pages(selected_site_key) if selected_site_key else []
+        return jsonify(build_content_optimization_summary(pages))
+
+    @app.get("/api/duplicate-content")
+    def duplicate_content_api():
+        selected_site = select_site(load_site_options())
+        selected_site_key = str(selected_site.get("key") or "")
+        pages = list_crawl_pages(selected_site_key) if selected_site_key else []
+        return jsonify(build_duplicate_content_summary(pages))
+
     @app.route("/api/matomo")
     def matomo():
         return jsonify(load_matomo_summary())
@@ -512,8 +716,10 @@ def create_app() -> Flask:
     @app.route("/issues/<issue_id>")
     def issue_detail(issue_id: str):
         site = resolve_requested_site_url()
-        summary = load_lighthouse_report_summary(site)
+        summary = load_lighthouse_report_summary(site, include_keywords=False)
         issue = find_issue(summary.get("issues_to_fix", []), issue_id)
+        if not issue and site:
+            issue = normalize_issue_detail(find_issue(database_issues(site_key(site)), issue_id))
         if not issue:
             target = f"/modules/issues?site={quote(site_key(site), safe='')}" if site else "/modules/issues"
             return redirect(target)
@@ -529,6 +735,7 @@ def create_app() -> Flask:
             selected_site_url=site or summary.get("final_url", ""),
             selected_site_label=site_label(site) if site else site_label(str(summary.get("final_url", ""))),
             site_options=load_site_options(),
+            issue_context=build_issue_context_summary(issue, summary, site),
         )
 
     @app.route("/api/status")
@@ -560,7 +767,25 @@ def portal_template_context(active_slug: str = "dashboard") -> dict[str, Any]:
         "DEFAULT_TARGET_URL", "https://example.gov.au"
     )
     selected_site_key = selected_site.get("key", "")
+    all_websites = list_websites()
     managed_issues = database_issues(selected_site_key) if selected_site_key else []
+    crawl_pages = list_crawl_pages(selected_site_key) if selected_site_key else []
+    content_optimization = build_content_optimization_summary(crawl_pages)
+    duplicate_content = build_duplicate_content_summary(crawl_pages)
+    recent_jobs = list_scan_jobs(selected_site_key or None)[:4]
+    latest_job = recent_jobs[0] if recent_jobs else None
+    lighthouse_summary = load_lighthouse_report_summary(
+        selected_site_url,
+        include_keywords=active_slug in {"keyword-suggestions", "activity-plans"},
+        crawl_pages=crawl_pages,
+    )
+    activity_plan_center = build_activity_plan_center(
+        lighthouse_summary.get("keyword_suggestions", {}).get("page_edit_queue", []),
+        managed_issues,
+        request.args.get("status", "todo").strip(),
+        list_keyword_actions(selected_site_key) if selected_site_key else [],
+        list_content_actions(selected_site_key) if selected_site_key else [],
+    )
     return {
         "title": os.getenv("PORTAL_TITLE", "OpenAudit Hub"),
         "subtitle": os.getenv(
@@ -572,17 +797,36 @@ def portal_template_context(active_slug: str = "dashboard") -> dict[str, Any]:
         "default_target_url": selected_site_url,
         "selected_site": selected_site,
         "selected_site_key": selected_site_key,
+        "selected_site_label": selected_site.get("label") or site_label(selected_site_url),
         "site_options": sites,
+        "website_count": len(all_websites),
+        "active_website_count": sum(1 for website in all_websites if website.get("active")),
         "targets": [site["url"] for site in sites if site.get("url")],
         "reports": load_reports(selected_site_url),
-        "crawl_pages": list_crawl_pages(selected_site_key) if selected_site_key else [],
+        "crawl_pages": crawl_pages,
+        "content_optimization": content_optimization,
+        "duplicate_content": duplicate_content,
+        "technical_crawl": build_technical_crawl_summary(crawl_pages, managed_issues),
+        "budget_summary": build_budget_summary(selected_site, managed_issues, lighthouse_summary),
         "managed_issues": managed_issues,
+        "content_governance": build_content_governance_summary(crawl_pages, managed_issues, selected_site_key),
         "pa11y_issues": [
             {**issue, "guidance": build_pa11y_guidance(issue)}
             for issue in managed_issues
             if issue.get("source") == "pa11y"
         ],
-        "lighthouse": load_lighthouse_report_summary(selected_site_url),
+        "lighthouse": lighthouse_summary,
+        "activity_plan_center": activity_plan_center,
+        "scan_jobs": recent_jobs,
+        "latest_scan_job": latest_job,
+        "operations_snapshot": build_operations_snapshot(
+            selected_site,
+            crawl_pages,
+            managed_issues,
+            recent_jobs,
+            lighthouse_summary,
+            all_websites,
+        ),
         "module_nav": module_navigation(active_slug),
         "active_slug": active_slug,
     }
@@ -599,6 +843,8 @@ def module_navigation(active_slug: str = "") -> list[dict[str, Any]]:
                 {"title": "Pages with issues", "slug": "pages"},
                 {"title": "Site architecture", "slug": "site-architecture"},
                 {"title": "Crawl comparison", "slug": "crawl-comparison"},
+                {"title": "Performance budgets", "slug": "performance-budgets"},
+                {"title": "Security headers", "slug": "security-headers"},
                 {"title": "Broken links", "slug": "broken-links"},
                 {"title": "Resolved issues", "slug": "resolved"},
                 {"title": "Prepublish checks", "slug": "prepublish"},
@@ -619,6 +865,7 @@ def module_navigation(active_slug: str = "") -> list[dict[str, Any]]:
             "badge": "New",
             "items": [
                 {"title": "SEO overview", "slug": "seo-advanced"},
+                {"title": "Activity plans", "slug": "activity-plans"},
                 {"title": "Content optimization", "slug": "content-optimization"},
                 {"title": "Duplicate content", "slug": "duplicate-content"},
                 {"title": "Keyword suggestions", "slug": "keyword-suggestions"},
@@ -740,6 +987,708 @@ def resolve_requested_site_url() -> str | None:
     return site.get("url") or None
 
 
+def build_operations_snapshot(
+    selected_site: dict[str, str],
+    crawl_pages: list[dict[str, Any]],
+    managed_issues: list[dict[str, Any]],
+    recent_jobs: list[dict[str, Any]],
+    lighthouse_summary: dict[str, Any],
+    all_websites: list[dict[str, Any]],
+) -> dict[str, Any]:
+    open_issues = [
+        issue for issue in managed_issues if issue.get("status") not in {"resolved", "ignored"}
+    ]
+    latest_job = recent_jobs[0] if recent_jobs else None
+    selected_label = selected_site.get("label") or site_label(selected_site.get("url", ""))
+    selected_url = selected_site.get("url", "")
+    next_action = "Run the first scan for this website."
+    if latest_job:
+        status = str(latest_job.get("status") or "")
+        if status in {"queued", "running"}:
+            next_action = "Wait for the current scan to finish, then review the updated issue list."
+        elif status == "failed":
+            next_action = "Review the latest scan error, then rerun the scan."
+        else:
+            next_action = "Open issues and work through the top priority items from the latest scan."
+    elif open_issues:
+        next_action = "Open issues and start with the highest-point fix."
+
+    report_site = str(
+        lighthouse_summary.get("report_source", {}).get("url")
+        or lighthouse_summary.get("final_url")
+        or ""
+    )
+    report_matches_selected = True
+    if selected_url and report_site:
+        report_matches_selected = site_key(selected_url) == site_key(report_site)
+
+    return {
+        "selected_label": selected_label or "No website selected",
+        "selected_url": selected_url,
+        "website_count": len(all_websites),
+        "active_website_count": sum(1 for website in all_websites if website.get("active")),
+        "page_count": len(crawl_pages),
+        "open_issue_count": len(open_issues),
+        "resolved_issue_count": sum(
+            1 for issue in managed_issues if issue.get("status") == "resolved"
+        ),
+        "latest_scan_status": str((latest_job or {}).get("status") or "not started").replace("_", " "),
+        "latest_scan_message": str((latest_job or {}).get("message") or "No scan has been queued yet."),
+        "latest_scan_type": str((latest_job or {}).get("scan_type") or "full"),
+        "latest_scan_progress": int((latest_job or {}).get("progress") or 0),
+        "latest_scan_started": str((latest_job or {}).get("started_at") or (latest_job or {}).get("created_at") or ""),
+        "latest_score": lighthouse_summary.get("overview_score", "n/a"),
+        "next_action": next_action,
+        "report_matches_selected": report_matches_selected,
+        "report_site": report_site,
+    }
+
+
+def build_budget_summary(website: dict[str, Any], issues: list[dict[str, Any]],
+                         lighthouse: dict[str, Any]) -> dict[str, Any]:
+    budget_issues = [
+        issue for issue in issues
+        if issue.get("source") == "budget" and issue.get("status") not in {"resolved", "ignored"}
+    ]
+    failed_ids = {str(issue.get("audit_id") or "") for issue in budget_issues}
+    metrics = {str(metric.get("label")): str(metric.get("value") or "n/a") for metric in lighthouse.get("metrics", [])}
+    scores = lighthouse.get("scores", {})
+    targets = [
+        {"id": "budget-performance", "label": "Performance", "current": scores.get("Performance", "n/a"), "target": f">= {website.get('budget_performance', 70)}/100"},
+        {"id": "budget-accessibility", "label": "Accessibility", "current": scores.get("Accessibility", "n/a"), "target": f">= {website.get('budget_accessibility', 80)}/100"},
+        {"id": "budget-seo", "label": "SEO", "current": scores.get("SEO", "n/a"), "target": f">= {website.get('budget_seo', 80)}/100"},
+        {"id": "budget-largest-contentful-paint", "label": "LCP", "current": metrics.get("LCP", "n/a"), "target": f"<= {website.get('budget_lcp_ms', 2500)}ms"},
+        {"id": "budget-cumulative-layout-shift", "label": "CLS", "current": metrics.get("CLS", "n/a"), "target": f"<= {website.get('budget_cls', 0.1)}"},
+    ]
+    for target in targets:
+        target["status"] = "Failed" if target["id"] in failed_ids else "Passed" if target["current"] != "n/a" else "Awaiting scan"
+    return {
+        "targets": targets, "issues": budget_issues,
+        "failed": len(budget_issues),
+        "passed": sum(1 for target in targets if target["status"] == "Passed"),
+        "status": "Action required" if budget_issues else "Within budget" if lighthouse.get("ok") else "Run Lighthouse",
+    }
+
+
+def build_activity_plan_center(
+    keyword_queue: list[dict[str, Any]],
+    managed_issues: list[dict[str, Any]],
+    selected_status: str = "todo",
+    saved_keyword_actions: list[dict[str, Any]] | None = None,
+    content_actions: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    rows: list[dict[str, Any]] = []
+    visible_action_keys: set[str] = set()
+    for item in keyword_queue:
+        workflow = item.get("workflow") or {}
+        status = str(workflow.get("status") or "suggested")
+        if workflow.get("action_key"):
+            visible_action_keys.add(str(workflow["action_key"]))
+        rows.append(
+            {
+                "kind": "keyword",
+                "title": str(item.get("keyword") or "Keyword recommendation"),
+                "subtitle": str(item.get("decision_label") or item.get("decision") or "SEO recommendation"),
+                "page_url": str(item.get("page") or ""),
+                "status": status,
+                "bucket": activity_status_bucket(status),
+                "owner": str(workflow.get("owner") or "Unassigned"),
+                "note": str(workflow.get("note") or ""),
+                "priority": str(item.get("priority") or "Review"),
+                "points": str(item.get("points") or "0"),
+                "updated_at": str(workflow.get("updated_at") or ""),
+                "decision": str(item.get("decision") or "Improve existing page"),
+                "keyword": str(item.get("keyword") or ""),
+            }
+        )
+
+    for action in saved_keyword_actions or []:
+        action_key_value = str(action.get("action_key") or "")
+        if action_key_value in visible_action_keys:
+            continue
+        status = str(action.get("status") or "suggested")
+        rows.append(
+            {
+                "kind": "keyword",
+                "title": str(action.get("keyword") or "Keyword recommendation"),
+                "subtitle": str(action.get("decision") or "SEO recommendation"),
+                "page_url": str(action.get("page_url") or ""),
+                "status": status,
+                "bucket": activity_status_bucket(status),
+                "owner": str(action.get("owner") or "Unassigned"),
+                "note": str(action.get("note") or ""),
+                "priority": "Tracked",
+                "points": "-",
+                "updated_at": str(action.get("updated_at") or ""),
+                "decision": str(action.get("decision") or "Improve existing page"),
+                "keyword": str(action.get("keyword") or ""),
+            }
+        )
+
+    for issue in managed_issues:
+        status = str(issue.get("status") or "open")
+        rows.append(
+            {
+                "kind": "issue",
+                "title": str(issue.get("title") or "Audit issue"),
+                "subtitle": f"{issue.get('source', 'audit')}: {issue.get('category', 'Issue')}",
+                "page_url": "",
+                "status": status,
+                "bucket": activity_status_bucket(status),
+                "owner": str(issue.get("owner") or "Unassigned"),
+                "note": str(issue.get("ignored_reason") or ""),
+                "priority": str(issue.get("priority") or "medium").title(),
+                "points": str(issue.get("points") or "0"),
+                "updated_at": str(issue.get("updated_at") or ""),
+                "issue_id": str(issue.get("id") or ""),
+                "issue_key": str(issue.get("issue_key") or issue.get("audit_id") or ""),
+            }
+        )
+
+    for action in content_actions or []:
+        status = str(action.get("status") or "suggested")
+        rows.append({
+            "kind": "content", "title": str(action.get("title") or "Content governance action"),
+            "subtitle": (
+                f"Content optimization: {len(action.get('affected_urls') or [])} page(s) to improve"
+                if action.get("action_type") == "content-optimization"
+                else f"Duplicate content: {len(action.get('affected_urls') or [])} page(s) to review"
+            ),
+            "page_url": str(action.get("primary_url") or ""), "status": status,
+            "bucket": activity_status_bucket(status), "owner": str(action.get("owner") or "Unassigned"),
+            "note": str(action.get("note") or ""), "priority": "High",
+            "points": str(action.get("points") or "0"), "updated_at": str(action.get("updated_at") or ""),
+            "action_type": str(action.get("action_type") or "duplicate-content"),
+            "affected_urls": action.get("affected_urls") or [],
+        })
+
+    allowed_filters = {"all", "todo", "in_progress", "completed", "ignored"}
+    selected_status = selected_status if selected_status in allowed_filters else "todo"
+    counts = Counter(row["bucket"] for row in rows)
+    visible = rows if selected_status == "all" else [row for row in rows if row["bucket"] == selected_status]
+    priority_order = {"highest impact": 0, "high": 1, "quick win": 1, "medium": 2, "review": 3, "low": 4}
+    visible.sort(
+        key=lambda row: (
+            0 if row["bucket"] == "in_progress" else 1,
+            priority_order.get(str(row["priority"]).lower(), 3),
+            str(row.get("title") or "").lower(),
+        )
+    )
+    filters = [
+        {"key": "all", "label": "All", "count": len(rows)},
+        {"key": "todo", "label": "To do", "count": counts.get("todo", 0)},
+        {"key": "in_progress", "label": "In progress", "count": counts.get("in_progress", 0)},
+        {"key": "completed", "label": "Completed", "count": counts.get("completed", 0)},
+        {"key": "ignored", "label": "Ignored", "count": counts.get("ignored", 0)},
+    ]
+    actionable = counts.get("todo", 0) + counts.get("in_progress", 0)
+    completion_rate = round((counts.get("completed", 0) / len(rows)) * 100) if rows else 0
+    owner_counts = Counter(str(row.get("owner") or "Unassigned") for row in rows if row["bucket"] not in {"completed", "ignored"})
+    type_counts = Counter(str(row.get("kind") or "issue") for row in rows)
+    return {
+        "rows": visible,
+        "filters": filters,
+        "selected_status": selected_status,
+        "total": len(rows),
+        "actionable": actionable,
+        "in_progress": counts.get("in_progress", 0),
+        "completed": counts.get("completed", 0),
+        "completion_rate": completion_rate,
+        "owner_workload": [{"owner": owner, "count": count} for owner, count in owner_counts.most_common(8)],
+        "work_types": [
+            {"key": key, "label": {"keyword": "Keyword", "content": "Content", "issue": "Audit issue"}.get(key, key.title()), "count": type_counts.get(key, 0)}
+            for key in ("issue", "content", "keyword") if type_counts.get(key, 0)
+        ],
+    }
+
+
+def activity_status_bucket(status: str) -> str:
+    normalized = str(status or "").strip().lower()
+    if normalized in {"completed", "resolved"}:
+        return "completed"
+    if normalized == "ignored":
+        return "ignored"
+    if normalized == "in_progress":
+        return "in_progress"
+    return "todo"
+
+
+def activity_plan_return_target(value: str, fallback: str) -> str:
+    value = str(value or "").strip()
+    parsed = urlparse(value)
+    if parsed.scheme or parsed.netloc or parsed.path != "/modules/activity-plans":
+        return fallback
+    return value
+
+
+def content_inventory_pages(crawl_pages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    pages = []
+    for page in crawl_pages:
+        status_code = safe_int(page.get("status_code"))
+        content_type = str(page.get("content_type") or "").lower()
+        url = str(page.get("url") or "").strip()
+        if not url or (status_code and status_code >= 400):
+            continue
+        if content_type and "html" not in content_type:
+            continue
+        pages.append(page)
+    return pages
+
+
+def build_content_optimization_summary(crawl_pages: list[dict[str, Any]]) -> dict[str, Any]:
+    pages = content_inventory_pages(crawl_pages)
+    rows: list[dict[str, Any]] = []
+    failed_checks = 0
+    thin_pages = 0
+    missing_metadata_pages = 0
+    for page in pages:
+        title = str(page.get("title") or "").strip()
+        meta = str(page.get("meta_description") or "").strip()
+        word_count = safe_int(page.get("word_count"))
+        h1_count = safe_int(page.get("h1_count"))
+        issues: list[dict[str, str]] = []
+        if not title:
+            issues.append({"label": "Missing title", "action": "Add a unique, descriptive title of roughly 30-60 characters."})
+        elif len(title) < 20:
+            issues.append({"label": "Title is too short", "action": "Clarify the page topic and value without repeating keywords."})
+        elif len(title) > 65:
+            issues.append({"label": "Title may truncate", "action": "Shorten the title while keeping the primary topic near the beginning."})
+        if not meta:
+            issues.append({"label": "Missing meta description", "action": "Write a unique summary that explains the page benefit and expected content."})
+        elif len(meta) < 70:
+            issues.append({"label": "Meta description is too short", "action": "Add useful context and a clear reason to visit the page."})
+        elif len(meta) > 170:
+            issues.append({"label": "Meta description may truncate", "action": "Keep the strongest benefit and remove repeated wording."})
+        if h1_count == 0:
+            issues.append({"label": "Missing H1", "action": "Add one visible H1 that describes the page's main purpose."})
+        elif h1_count > 1:
+            issues.append({"label": "Multiple H1 headings", "action": "Keep one primary H1 and use H2/H3 for supporting sections."})
+        if 0 < word_count < 150:
+            thin_pages += 1
+            issues.append({"label": "Thin content", "action": "Add original copy that answers user questions and supports the page purpose."})
+        if not title or not meta:
+            missing_metadata_pages += 1
+        failed_checks += len(issues)
+        if issues:
+            points = round(min(15.0, len(issues) * 2.5 + (2.5 if not title else 0)), 1)
+            rows.append(
+                {
+                    "url": str(page.get("url") or ""),
+                    "title": title or "Untitled page",
+                    "word_count": word_count,
+                    "h1_count": h1_count,
+                    "meta": meta,
+                    "issues": issues,
+                    "issue_count": len(issues),
+                    "priority": "High" if len(issues) >= 3 or not title else "Medium" if len(issues) == 2 else "Quick win",
+                    "points": points,
+                    "action_title": f"Improve content quality for {title or str(page.get('url') or 'page')}",
+                    "action_note": " ".join(f"{issue['label']}: {issue['action']}" for issue in issues),
+                }
+            )
+    rows.sort(key=lambda row: (-row["issue_count"], row["url"]))
+    total_checks = len(pages) * 4
+    score = round(max(0, 100 - (failed_checks / total_checks * 100)), 1) if total_checks else 0.0
+    return {
+        "status": "Ready" if pages else "Run crawl",
+        "score": score,
+        "pages": len(pages),
+        "healthy_pages": max(0, len(pages) - len(rows)),
+        "needs_attention": len(rows),
+        "thin_pages": thin_pages,
+        "missing_metadata_pages": missing_metadata_pages,
+        "rows": rows[:100],
+    }
+
+
+def normalized_duplicate_value(value: str) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip().lower())
+
+
+def simhash_distance(left: str, right: str) -> int:
+    try:
+        return (int(str(left), 16) ^ int(str(right), 16)).bit_count()
+    except (TypeError, ValueError):
+        return 64
+
+
+def duplicate_primary_page(pages: list[dict[str, Any]]) -> dict[str, Any]:
+    """Prefer the most substantial, shallowest URL as the consolidation target."""
+    return sorted(
+        pages,
+        key=lambda page: (
+            -safe_int(page.get("word_count")),
+            urlparse(str(page.get("url") or "")).path.count("/"),
+            len(str(page.get("url") or "")),
+            str(page.get("url") or ""),
+        ),
+    )[0]
+
+
+def enrich_duplicate_group(group: dict[str, Any], source_pages: list[dict[str, Any]]) -> dict[str, Any]:
+    page_lookup = {str(page.get("url") or ""): page for page in source_pages}
+    matched_pages = [page_lookup[url] for url in group.get("pages", []) if url in page_lookup]
+    if not matched_pages:
+        return group
+    primary = duplicate_primary_page(matched_pages)
+    primary_url = str(primary.get("url") or "")
+    duplicate_pages = []
+    for page in matched_pages:
+        url = str(page.get("url") or "")
+        if url == primary_url:
+            continue
+        duplicate_pages.append(
+            {
+                "url": url,
+                "title": str(page.get("title") or "Untitled page"),
+                "word_count": safe_int(page.get("word_count")),
+                "recommendation": (
+                    "Merge and redirect if this page serves the same visitor intent; otherwise rewrite its unique topic and metadata."
+                    if group.get("field") in {"body_exact", "body_near"}
+                    else "Rewrite this field so it describes this page's specific purpose and search intent."
+                ),
+            }
+        )
+    return {
+        **group,
+        "primary_page": {
+            "url": primary_url,
+            "title": str(primary.get("title") or "Untitled page"),
+            "word_count": safe_int(primary.get("word_count")),
+        },
+        "duplicate_pages": duplicate_pages,
+        "points": round(min(20.0, 2.5 + max(0, len(matched_pages) - 1) * 2.5), 1),
+        "decision_note": "The suggested primary page has the most measured content; review traffic, backlinks, and conversions before redirecting anything.",
+    }
+
+
+def near_duplicate_body_groups(
+    pages: list[dict[str, Any]],
+    excluded_hashes: set[str],
+    threshold: int = 5,
+) -> list[dict[str, Any]]:
+    candidates = [
+        page for page in pages
+        if page.get("content_simhash") and str(page.get("content_hash") or "") not in excluded_hashes
+    ]
+    parent = list(range(len(candidates)))
+
+    def find(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    def union(left_index: int, right_index: int) -> None:
+        left_root = find(left_index)
+        right_root = find(right_index)
+        if left_root != right_root:
+            parent[right_root] = left_root
+
+    for left_index, left_page in enumerate(candidates):
+        left_words = max(1, safe_int(left_page.get("word_count")))
+        for right_index in range(left_index + 1, len(candidates)):
+            right_page = candidates[right_index]
+            right_words = max(1, safe_int(right_page.get("word_count")))
+            if min(left_words, right_words) / max(left_words, right_words) < 0.7:
+                continue
+            if simhash_distance(
+                str(left_page.get("content_simhash") or ""),
+                str(right_page.get("content_simhash") or ""),
+            ) <= threshold:
+                union(left_index, right_index)
+
+    components: dict[int, list[dict[str, Any]]] = {}
+    for index, page in enumerate(candidates):
+        components.setdefault(find(index), []).append(page)
+    groups = []
+    for component in components.values():
+        if len(component) < 2:
+            continue
+        distances = [
+            simhash_distance(str(left.get("content_simhash")), str(right.get("content_simhash")))
+            for index, left in enumerate(component)
+            for right in component[index + 1:]
+        ]
+        closest_distance = min(distances) if distances else threshold
+        groups.append(
+            enrich_duplicate_group({
+                "field": "body_near",
+                "label": "Near-duplicate body",
+                "value": f"Very similar body wording (SimHash distance {threshold}/64 or less)",
+                "pages": [str(page.get("url") or "") for page in component],
+                "count": len(component),
+                "risk": "High" if len(component) >= 4 else "Medium",
+                "action": "Choose the primary page, consolidate overlapping copy, and rewrite the remaining pages around their unique purpose.",
+                "similarity": f"About {round((64 - closest_distance) / 64 * 100)}% fingerprint similarity",
+            }, pages)
+        )
+    return groups
+
+
+def build_duplicate_content_summary(crawl_pages: list[dict[str, Any]]) -> dict[str, Any]:
+    pages = content_inventory_pages(crawl_pages)
+    grouped: dict[tuple[str, str], dict[str, Any]] = {}
+    for page in pages:
+        for field, label, minimum in (
+            ("title", "Title", 5),
+            ("meta_description", "Meta description", 30),
+        ):
+            original = str(page.get(field) or "").strip()
+            normalized = normalized_duplicate_value(original)
+            if len(normalized) < minimum:
+                continue
+            group = grouped.setdefault(
+                (field, normalized),
+                {"field": field, "label": label, "value": original, "pages": []},
+            )
+            group["pages"].append(str(page.get("url") or ""))
+
+        content_hash = str(page.get("content_hash") or "").strip().lower()
+        if len(content_hash) == 64:
+            body_group = grouped.setdefault(
+                ("body_exact", content_hash),
+                {
+                    "field": "body_exact",
+                    "label": "Exact body content",
+                    "value": "Identical privacy-preserving body fingerprint",
+                    "pages": [],
+                },
+            )
+            body_group["pages"].append(str(page.get("url") or ""))
+
+    groups = []
+    affected_pages: set[str] = set()
+    exact_body_hashes: set[str] = set()
+    for group_key, group in grouped.items():
+        unique_pages = list(dict.fromkeys(group["pages"]))
+        if len(unique_pages) < 2:
+            continue
+        if group["field"] == "body_exact":
+            exact_body_hashes.add(group_key[1])
+        affected_pages.update(unique_pages)
+        if group["field"] == "title":
+            action = "Give each page a title that reflects its unique product, service, or intent."
+        elif group["field"] == "meta_description":
+            action = "Write a distinct description that summarizes the specific page instead of reusing a site-wide default."
+        else:
+            action = "Choose the primary page, consolidate identical copy where appropriate, and rewrite pages that serve a different intent."
+        groups.append(
+            enrich_duplicate_group({
+                **group,
+                "pages": unique_pages,
+                "count": len(unique_pages),
+                "risk": "High" if len(unique_pages) >= 4 else "Medium",
+                "action": action,
+                "similarity": "100% exact match",
+            }, pages)
+        )
+    near_body_groups = near_duplicate_body_groups(pages, exact_body_hashes)
+    groups.extend(near_body_groups)
+    for group in near_body_groups:
+        affected_pages.update(group["pages"])
+    groups.sort(key=lambda group: (-group["count"], group["label"], group["value"].lower()))
+    duplicate_title_groups = sum(1 for group in groups if group["field"] == "title")
+    duplicate_meta_groups = sum(1 for group in groups if group["field"] == "meta_description")
+    exact_body_groups = sum(1 for group in groups if group["field"] == "body_exact")
+    near_body_group_count = sum(1 for group in groups if group["field"] == "body_near")
+    fingerprinted_pages = sum(1 for page in pages if page.get("content_simhash"))
+    affected_ratio = len(affected_pages) / len(pages) if pages else 0
+    score = round(max(0, 100 - affected_ratio * 70), 1) if pages else 0.0
+    return {
+        "status": "Ready" if pages else "Run crawl",
+        "score": score,
+        "pages": len(pages),
+        "affected_pages": len(affected_pages),
+        "duplicate_title_groups": duplicate_title_groups,
+        "duplicate_meta_groups": duplicate_meta_groups,
+        "exact_body_groups": exact_body_groups,
+        "near_body_groups": near_body_group_count,
+        "fingerprinted_pages": fingerprinted_pages,
+        "groups": groups[:50],
+        "body_similarity_status": "Live" if fingerprinted_pages else "Run a new Content scan",
+    }
+
+
+def build_issue_context_summary(
+    issue: dict[str, Any],
+    lighthouse_summary: dict[str, Any],
+    site_url: str | None,
+) -> dict[str, Any]:
+    examples = issue.get("affected_examples") or []
+    affected_pages = []
+    seen_pages: set[str] = set()
+    for example in examples:
+        page_url = str(example.get("page_url") or "").strip()
+        if page_url and page_url not in seen_pages:
+            affected_pages.append(page_url)
+            seen_pages.add(page_url)
+
+    report_site = str(
+        lighthouse_summary.get("report_source", {}).get("url")
+        or lighthouse_summary.get("final_url")
+        or ""
+    )
+    selected_site = site_url or report_site
+    site_match = True
+    if site_url and report_site:
+        site_match = site_key(site_url) == site_key(report_site)
+
+    first_step = ""
+    steps = issue.get("fix_guidance", {}).get("steps") or []
+    if steps:
+        first_step = str(steps[0])
+
+    return {
+        "selected_site": selected_site,
+        "report_site": report_site,
+        "site_match": site_match,
+        "affected_pages": affected_pages[:5],
+        "affected_page_count": len(affected_pages) or int(issue.get("pages") or 0),
+        "occurrence_count": int(issue.get("occurrences") or 0),
+        "owner": str(issue.get("fix_guidance", {}).get("owner") or issue.get("responsibility") or "Team"),
+        "first_step": first_step,
+        "success_signal": str(issue.get("fix_guidance", {}).get("success_signal") or ""),
+    }
+
+
+def normalize_issue_detail(issue: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not issue:
+        return None
+
+    normalized = dict(issue)
+    examples = normalized.get("affected_examples") or normalized.get("evidence") or []
+    occurrences = int(normalized.get("occurrences") or len(examples) or 1)
+    page_urls = {
+        str(example.get("page_url") or "").strip()
+        for example in examples
+        if str(example.get("page_url") or "").strip()
+    }
+    page_count = int(normalized.get("pages") or len(page_urls) or 1)
+    points_value = float(normalized.get("points") or 0)
+    if points_value <= 0:
+        points_value = float(page_count or 1)
+
+    normalized.update(
+        {
+            "category": str(normalized.get("category") or "Issue"),
+            "recommendation": str(
+                normalized.get("recommendation")
+                or normalized.get("summary")
+                or normalized.get("description")
+                or "Review the affected examples and apply the recommended fix."
+            ),
+            "conformance": str(normalized.get("conformance") or normalized.get("category") or "Review"),
+            "difficulty": str(normalized.get("difficulty") or "Medium"),
+            "responsibility": str(
+                normalized.get("responsibility") or normalized.get("owner") or "Development"
+            ),
+            "element": str(normalized.get("element") or "Component"),
+            "occurrences": str(occurrences),
+            "pages": str(page_count),
+            "points": f"{points_value:.1f}",
+            "affected_examples": examples,
+        }
+    )
+    normalized["fix_guidance"] = normalized.get("fix_guidance") or build_managed_issue_fix_guidance(
+        normalized
+    )
+    return normalized
+
+
+def build_managed_issue_fix_guidance(issue: dict[str, Any]) -> dict[str, Any]:
+    source = str(issue.get("source") or "").lower()
+    owner = str(issue.get("owner") or issue.get("responsibility") or "Development")
+    priority = str(issue.get("priority") or issue.get("difficulty") or "Medium")
+    examples = issue.get("affected_examples") or []
+    first_page = ""
+    if examples:
+        first_page = str(examples[0].get("page_url") or "").strip()
+
+    if source == "budget":
+        audit_id = str(issue.get("audit_id") or issue.get("issue_key") or "")
+        measured = str((examples[0] if examples else {}).get("explanation") or "Review the current value against the configured threshold.")
+        if "largest-contentful-paint" in audit_id:
+            change = "Optimize the LCP element, server response, critical image or font loading, and render-blocking resources."
+            checks = ["LCP is at or below the configured millisecond limit.", "The page remains visually stable and the primary content still renders correctly."]
+        elif "cumulative-layout-shift" in audit_id:
+            change = "Reserve dimensions for media and embeds, stabilize fonts, and prevent late banners or widgets from moving content."
+            checks = ["CLS is at or below the configured limit.", "No visible content jumps during page load or interaction."]
+        else:
+            change = "Fix the highest-impact failed audits in this category until the score reaches the configured minimum."
+            checks = ["The category score reaches the configured minimum.", "No new critical regression is introduced by the changes."]
+        return {
+            "owner": owner, "priority": priority,
+            "handoff_note": measured,
+            "success_signal": checks[0],
+            "what_to_change": [change],
+            "why_it_matters": "This page is outside the quality threshold agreed for the selected website.",
+            "where_to_change": [{"place": first_page or "Affected page or shared template", "detail": measured}],
+            "steps": ["Open the latest Lighthouse report for the affected page.", change, "Run a new Lighthouse or Full audit."],
+            "validation": checks,
+            "acceptance_criteria": checks,
+            "code_hint": "Adjust thresholds only when the business requirement changes; do not raise a limit merely to make the warning disappear.",
+        }
+
+    if source == "pa11y":
+        guidance = build_pa11y_guidance(issue)
+        return {
+            "owner": guidance.get("owner", owner),
+            "priority": priority,
+            "handoff_note": guidance.get("summary", ""),
+            "success_signal": guidance.get("verify", ""),
+            "what_to_change": [guidance.get("summary", "Fix the accessibility markup or content.")],
+            "why_it_matters": "This issue affects accessibility and should be fixed in the source component so it stays fixed across pages.",
+            "where_to_change": [
+                {
+                    "place": guidance.get("where", "Component or template"),
+                    "detail": "Use the evidence and selector below to locate the shared source.",
+                }
+            ],
+            "steps": guidance.get("steps", []),
+            "validation": [guidance.get("verify", "Run the same Pa11y scan again and confirm the issue is gone.")],
+            "acceptance_criteria": [
+                "The same Pa11y finding no longer appears for the affected page.",
+                "The markup remains valid and accessible after the change.",
+            ],
+            "code_hint": guidance.get("good_example", ""),
+        }
+
+    location = "Affected page or shared template"
+    if first_page:
+        location = first_page
+    return {
+        "owner": owner,
+        "priority": priority,
+        "handoff_note": "Use the affected example and rescan the website after the fix ships.",
+        "success_signal": "The issue disappears or the occurrence count drops in the next scan.",
+        "what_to_change": [
+            str(issue.get("recommendation") or "Apply the recommended fix to the affected page or template.")
+        ],
+        "why_it_matters": "Leaving the issue unresolved reduces quality score and keeps the same problem live on the website.",
+        "where_to_change": [
+            {
+                "place": location,
+                "detail": "Start with the affected example below, then fix the shared template if more than one page is involved.",
+            }
+        ],
+        "steps": [
+            "Open the affected page or template and confirm the problem using the evidence below.",
+            "Apply the smallest safe fix that removes the issue at source.",
+            "Run a fresh scan for this website to confirm the issue is resolved.",
+        ],
+        "validation": [
+            "A new scan shows the issue removed or reduced.",
+            "The page still renders correctly after the change.",
+        ],
+        "acceptance_criteria": [
+            "The issue no longer appears in the next scan.",
+            "The fix is applied in the shared source when multiple pages are affected.",
+        ],
+        "code_hint": "Use the affected selector, page URL, and rendered output to locate the source component quickly.",
+    }
+
+
 def site_label(url: str) -> str:
     parsed = urlparse(url)
     return parsed.netloc or url.replace("https://", "").replace("http://", "").strip("/")
@@ -787,7 +1736,11 @@ def load_reports(site_url: str | None = None) -> list[dict[str, str]]:
     return reports[:20]
 
 
-def load_lighthouse_report_summary(site_url: str | None = None) -> dict[str, Any]:
+def load_lighthouse_report_summary(
+    site_url: str | None = None,
+    include_keywords: bool = True,
+    crawl_pages: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     json_report = latest_report_file(".report.json", site_url)
     if not json_report:
         return {
@@ -823,12 +1776,12 @@ def load_lighthouse_report_summary(site_url: str | None = None) -> dict[str, Any
             "campaign_summary": build_campaign_summary(),
             "behavior_summary": build_behavior_summary({}),
             "content_quality": build_content_quality_summary({}),
-            "link_integrity": build_link_integrity_summary([]),
+            "link_integrity": build_link_integrity_summary(load_reports(site_url), crawl_pages or []),
             "document_governance": build_document_governance_summary([]),
             "privacy_summary": build_privacy_summary({}),
             "response_summary": build_response_summary({}),
-            "connector_summary": build_connector_summary([]),
-            "crawler_summary": build_crawler_summary({}, {}, []),
+            "connector_summary": build_connector_summary(load_reports(site_url)),
+            "crawler_summary": build_crawler_summary({}, {}, load_reports(site_url), crawl_pages or []),
             "architecture_summary": build_architecture_summary({}, []),
             "comparison_summary": build_comparison_summary([]),
             "ai_recommendations": build_ai_recommendations([]),
@@ -839,9 +1792,9 @@ def load_lighthouse_report_summary(site_url: str | None = None) -> dict[str, Any
             "report_source": {},
         }
 
-    cache_key = f"{lighthouse_cache_key(json_report)}:{report_collection_cache_key(site_url)}:{search_console_cache_key(site_url)}"
-    if _LIGHTHOUSE_SUMMARY_CACHE.get("key") == cache_key:
-        return _LIGHTHOUSE_SUMMARY_CACHE["value"]
+    cache_key = f"{lighthouse_cache_key(json_report)}:{report_collection_cache_key(site_url)}:{search_console_cache_key(site_url)}:{crawl_inventory_cache_key(crawl_pages or [])}:keywords={include_keywords}"
+    if cache_key in _LIGHTHOUSE_SUMMARY_CACHE:
+        return _LIGHTHOUSE_SUMMARY_CACHE[cache_key]
 
     try:
         data = json.loads(json_report.read_text(encoding="utf-8"))
@@ -879,12 +1832,12 @@ def load_lighthouse_report_summary(site_url: str | None = None) -> dict[str, Any
             "campaign_summary": build_campaign_summary(),
             "behavior_summary": build_behavior_summary({}),
             "content_quality": build_content_quality_summary({}),
-            "link_integrity": build_link_integrity_summary([]),
+            "link_integrity": build_link_integrity_summary(load_reports(site_url), crawl_pages or []),
             "document_governance": build_document_governance_summary([]),
             "privacy_summary": build_privacy_summary({}),
             "response_summary": build_response_summary({}),
-            "connector_summary": build_connector_summary([]),
-            "crawler_summary": build_crawler_summary({}, {}, []),
+            "connector_summary": build_connector_summary(load_reports(site_url)),
+            "crawler_summary": build_crawler_summary({}, {}, load_reports(site_url), crawl_pages or []),
             "architecture_summary": build_architecture_summary({}, []),
             "comparison_summary": build_comparison_summary([]),
             "ai_recommendations": build_ai_recommendations([]),
@@ -930,7 +1883,10 @@ def load_lighthouse_report_summary(site_url: str | None = None) -> dict[str, Any
             issue["lifecycle_status"] = lifecycle.get("status", "open")
             issue["lifecycle_owner"] = lifecycle.get("owner", issue.get("responsibility", "Unassigned"))
             issue["lifecycle_evidence"] = lifecycle.get("evidence", [])
-            if not issue.get("affected_examples") and lifecycle.get("evidence"):
+            has_visual_evidence = any(
+                evidence.get("screenshot_path") for evidence in lifecycle.get("evidence", [])
+            )
+            if lifecycle.get("evidence") and (not issue.get("affected_examples") or has_visual_evidence):
                 issue["affected_examples"] = lifecycle["evidence"]
     resolved_checks = extract_resolved_checks(categories, audits)
     remediation_issue = select_remediation_issue(issues_to_fix)
@@ -966,19 +1922,22 @@ def load_lighthouse_report_summary(site_url: str | None = None) -> dict[str, Any
         "export_formats": build_export_formats(),
         "feature_modules": build_feature_modules(issues_to_fix, audits, reports),
         "seo_advanced": build_seo_advanced_summary(categories, audits),
-        "keyword_suggestions": build_keyword_suggestions(data, audits, issues_to_fix, reports),
+        "keyword_suggestions": (
+            build_keyword_suggestions(data, audits, issues_to_fix, reports)
+            if include_keywords else build_keyword_suggestions({}, {}, [], [])
+        ),
         "accessibility_breakdown": build_accessibility_breakdown(categories, issues_to_fix),
         "prepublish_summary": build_prepublish_summary(issues_to_fix),
         "analytics_summary": build_analytics_summary(audits, issues_to_fix, reports),
         "campaign_summary": build_campaign_summary(),
         "behavior_summary": build_behavior_summary(audits),
         "content_quality": build_content_quality_summary(audits),
-        "link_integrity": build_link_integrity_summary(reports),
+        "link_integrity": build_link_integrity_summary(reports, crawl_pages or []),
         "document_governance": build_document_governance_summary(reports),
         "privacy_summary": build_privacy_summary(audits),
         "response_summary": build_response_summary(audits),
         "connector_summary": build_connector_summary(reports),
-        "crawler_summary": build_crawler_summary(data, audits, reports),
+        "crawler_summary": build_crawler_summary(data, audits, reports, crawl_pages or []),
         "architecture_summary": build_architecture_summary(data, issues_to_fix),
         "comparison_summary": build_comparison_summary(reports),
         "ai_recommendations": build_ai_recommendations(issues_to_fix),
@@ -1000,8 +1959,7 @@ def load_lighthouse_report_summary(site_url: str | None = None) -> dict[str, Any
         "html": html_report.name if html_report.exists() else "",
         "generated_at": summary["generated_at"],
     }
-    _LIGHTHOUSE_SUMMARY_CACHE["key"] = cache_key
-    _LIGHTHOUSE_SUMMARY_CACHE["value"] = summary
+    _LIGHTHOUSE_SUMMARY_CACHE[cache_key] = summary
     return summary
 
 
@@ -1028,6 +1986,13 @@ def report_collection_cache_key(site_url: str | None = None) -> str:
             continue
         parts.append(f"{path.name}:{stat.st_mtime_ns}:{stat.st_size}")
     return "|".join(sorted(parts)) or "empty"
+
+
+def crawl_inventory_cache_key(crawl_pages: list[dict[str, Any]]) -> str:
+    if not crawl_pages:
+        return "crawl-pages=0"
+    urls = [str(page.get("url") or "") for page in crawl_pages if page.get("url")]
+    return f"crawl-pages={len(crawl_pages)}:{hash('|'.join(sorted(urls[:50])))}"
 
 
 def search_console_cache_key(site_url: str | None = None) -> str:
@@ -1766,7 +2731,15 @@ def select_remediation_issue(issues: list[dict[str, Any]]) -> dict[str, Any] | N
 
 def find_issue(issues: list[dict[str, Any]], issue_id: str) -> dict[str, Any] | None:
     for issue in issues:
-        if issue.get("id") == issue_id:
+        issue_identity_values = {
+            str(issue.get("id") or ""),
+            str(issue.get("audit_id") or ""),
+            str(issue.get("issue_key") or ""),
+        }
+        issue_key_value = str(issue.get("issue_key") or "")
+        if ":" in issue_key_value:
+            issue_identity_values.add(issue_key_value.split(":", 1)[1])
+        if issue_id in issue_identity_values:
             return issue
     return None
 
@@ -2064,10 +3037,10 @@ def build_seo_advanced_summary(
     return {
         "overall": score_to_string(seo),
         "tabs": [
-            {"name": "Activity Plan overview", "status": "Planned"},
+            {"name": "Activity Plan overview", "status": "Live"},
             {"name": "Issues and recommendations", "status": "Live"},
-            {"name": "Content optimization", "status": "Partial"},
-            {"name": "Duplicate content", "status": "Planned"},
+            {"name": "Content optimization", "status": "Live"},
+            {"name": "Duplicate content", "status": "Live"},
             {"name": "Keyword suggestions", "status": "Starter suggestions"},
             {"name": "Google Search Console", "status": "Connector needed"},
         ],
@@ -2122,6 +3095,33 @@ KEYWORD_STOP_WORDS = {
     "conditions",
 }
 
+KEYWORD_GENERIC_PHRASE_TOKENS = {
+    "australian",
+    "automotive",
+    "company",
+    "industrial",
+    "quality",
+    "series",
+    "solutions",
+}
+
+KEYWORD_PRODUCT_NOUNS = {
+    "bar",
+    "bracket",
+    "indicator",
+    "kit",
+    "lamp",
+    "lamps",
+    "light",
+    "lightbar",
+    "lightbars",
+    "lights",
+    "marker",
+    "reflector",
+    "strut",
+    "tray",
+}
+
 
 def build_keyword_suggestions(
     data: dict[str, Any],
@@ -2136,16 +3136,24 @@ def build_keyword_suggestions(
         [report for report in reports if report.get("kind") == "Sitemap crawl report"]
     )
     sitemap_urls = normalize_sitemap_urls(sitemap)
-    source_urls = [final_url] + sitemap_urls
-    source_urls = [url for url in source_urls if url]
+    crawl_urls = load_keyword_crawl_urls(final_url)
+    source_urls = build_keyword_source_urls(final_url, crawl_urls, sitemap_urls)
 
     page_title = audit_text(audits.get("document-title"))
     meta_description = audit_text(audits.get("meta-description"))
     text_sources = [page_title, meta_description]
     counter: Counter[str] = Counter()
     url_sources: dict[str, set[str]] = {}
-    content_keywords = extract_content_keywords(source_urls[:6])
+    content_source_urls = source_urls[:12]
+    content_keywords = extract_content_keywords(content_source_urls)
     search_console = build_search_console_summary(final_url)
+    brand_name = seo_brand_name(final_url)
+    page_snapshots = build_keyword_page_snapshots(source_urls[:20])
+    search_console_actions = build_search_console_actions(
+        search_console.get("rows", []),
+        page_snapshots,
+        issues,
+    )
 
     for url in source_urls:
         parsed_url = urlparse(url)
@@ -2165,37 +3173,88 @@ def build_keyword_suggestions(
             url_sources.setdefault(keyword, set()).add(url)
 
     rows = []
-    for keyword, count in counter.most_common(14):
+    seen_candidates: set[tuple[str, str]] = set()
+    for raw_keyword, count in counter.most_common(60):
+        keyword = raw_keyword
         urls = sorted(url_sources.get(keyword, set()))
         page = urls[0] if urls else final_url
         affected_pages = len(urls) if urls else 1
-        score_gain = keyword_score_gain(keyword, count, affected_pages, issues)
-        difficulty = keyword_difficulty(keyword, affected_pages, issues)
         metrics = match_search_console_metrics(keyword, page, search_console.get("rows", []))
+        page_snapshot = page_snapshots.get(page, {})
+        keyword = page_specific_keyword_phrase(keyword, page, page_snapshot)
+        if not metrics:
+            metrics = match_search_console_metrics(keyword, page, search_console.get("rows", []))
+        candidate_key = (keyword.lower(), page)
+        if candidate_key in seen_candidates or not keyword_candidate_is_useful(
+            raw_keyword,
+            keyword,
+            page,
+            metrics,
+        ):
+            continue
+        seen_candidates.add(candidate_key)
+        page_issues = keyword_relevant_issues(page, issues)
+        score_gain = keyword_score_gain(keyword, count, affected_pages, page_issues, metrics)
+        difficulty = keyword_difficulty(keyword, affected_pages, page_issues, metrics)
+        opportunity = keyword_opportunity(keyword, page_issues, page_snapshot, metrics)
+        focus = keyword_focus_area(page_snapshot, page_issues, page)
+        why_now = keyword_why_now(keyword, page, metrics, page_snapshot, page_issues)
+        decision = keyword_strategy_decision(keyword, page, page_snapshot, metrics)
+        decision_label = keyword_decision_summary(keyword, page, page_snapshot, metrics, page_issues)
+        confidence = keyword_decision_confidence(keyword, page, page_snapshot, metrics, page_issues)
+        content_brief = (
+            keyword_supporting_content_brief(keyword, page, metrics)
+            if decision == "Create supporting content"
+            else {}
+        )
         rows.append(
             {
                 "keyword": keyword,
                 "intent": classify_keyword_intent(page, keyword),
+                "decision": decision,
+                "decision_label": decision_label,
+                "confidence": confidence,
+                "confidence_class": keyword_confidence_class(confidence),
+                "content_brief": content_brief,
                 "source_count": str(max(count, 1)),
                 "affected_pages": str(affected_pages),
                 "score_gain": f"{score_gain:.2f}",
                 "difficulty": difficulty,
                 "status": "Suggested",
-                "opportunity": keyword_opportunity(keyword, issues),
+                "opportunity": opportunity,
+                "focus": focus,
                 "page": page,
-                "reason": keyword_reason(keyword, page, count, issues, content_keywords),
-                "action": keyword_action(keyword, page),
+                "reason": keyword_reason(keyword, page, count, page_issues, content_keywords),
+                "action": keyword_action(keyword, page, page_snapshot, metrics),
+                "why_now": why_now,
+                "why_it_matters": keyword_why_it_matters(keyword, page, page_snapshot, metrics, page_issues),
+                "matched_query": metrics.get("query", ""),
+                "current_title": page_snapshot.get("title", ""),
+                "current_h1": page_snapshot.get("h1", ""),
+                "current_meta": page_snapshot.get("meta", ""),
                 "clicks": metrics.get("clicks", "-"),
                 "impressions": metrics.get("impressions", "-"),
                 "ctr": metrics.get("ctr", "-"),
                 "position": metrics.get("position", "-"),
             }
         )
+        if len(rows) >= 14:
+            break
 
-    page_opportunities = build_page_keyword_opportunities(source_urls[:40], issues)
-    optimization_briefs = build_keyword_optimization_briefs(page_opportunities, rows)
+    rows = sorted(rows, key=keyword_priority_sort_key, reverse=True)
+    page_opportunities = build_page_keyword_opportunities(source_urls[:40], issues, search_console.get("rows", []), page_snapshots)
+    optimization_briefs = build_keyword_optimization_briefs(page_opportunities, rows, brand_name)
+    page_edit_queue = build_page_edit_queue(optimization_briefs)
+    workflow_summary = apply_keyword_action_states(
+        site_key(final_url),
+        page_edit_queue,
+        optimization_briefs,
+        page_opportunities,
+        rows,
+    )
+    cannibalization = build_keyword_cannibalization(page_opportunities)
     status = "Generated" if rows else "Needs sitemap"
-    source = keyword_source_label(sitemap_urls, content_keywords)
+    source = keyword_source_label(sitemap_urls, crawl_urls, content_keywords)
     return {
         "status": status,
         "source": source,
@@ -2203,20 +3262,24 @@ def build_keyword_suggestions(
         "rows": rows,
         "page_opportunities": page_opportunities,
         "optimization_briefs": optimization_briefs,
+        "page_edit_queue": page_edit_queue,
+        "workflow_summary": workflow_summary,
+        "cannibalization": cannibalization,
         "search_console": search_console,
+        "search_console_actions": search_console_actions,
         "tracked_pages": len(source_urls),
         "overview": build_keyword_overview(rows, source_urls, issues),
         "filters": [
             {"name": "All suggestions", "count": str(len(rows)), "active": True},
             {"name": "Highest impact", "count": str(sum(1 for row in rows if float(row["score_gain"]) >= 1.5)), "active": False},
             {"name": "Quick wins", "count": str(sum(1 for row in rows if row["difficulty"] == "Low")), "active": False},
-            {"name": "Needs metadata", "count": str(sum(1 for row in rows if "meta" in row["opportunity"].lower())), "active": False},
+            {"name": "Needs metadata", "count": str(sum(1 for row in rows if row.get("focus") in {"Title tag", "Meta description", "Heading structure"})), "active": False},
         ],
         "activity_plan": build_keyword_activity_plan(rows, page_opportunities),
         "content_gaps": build_keyword_content_gaps(audits, issues),
         "engine": {
             "content_extractor": "YAKE" if yake else "Not installed",
-            "content_pages_sampled": str(len({url for item in content_keywords for url in item["pages"]})),
+            "content_pages_sampled": str(len(content_source_urls)),
             "content_keywords": str(len(content_keywords)),
         },
         "next_integrations": [
@@ -2232,12 +3295,14 @@ def build_keyword_suggestions(
             },
             {
                 "name": "Content approval workflow",
-                "status": "Later",
+                "status": "Live",
                 "value": "Mark recommendations as accepted, ignored, assigned or fixed",
             },
         ],
         "next_step": (
             "Connect Google Search Console later to replace these starter ideas with real queries, impressions, clicks and ranking movement."
+            if not search_console.get("connected")
+            else "Start with the Search Console opportunities below, because they already represent real demand from searchers."
         ),
     }
 
@@ -2268,14 +3333,57 @@ def audit_text(audit: Any) -> str:
     return " ".join(parts)
 
 
+def seo_brand_name(url: str) -> str:
+    host = site_label(url or "").replace("www.", "")
+    if not host:
+        return "Your Brand"
+    root = host.split(".")[0]
+    words = [token for token in re.split(r"[^a-z0-9]+", root.lower()) if token]
+    if not words:
+        return "Your Brand"
+    return " ".join(word.upper() if word in {"led", "4wd"} else word.capitalize() for word in words)
+
+
+def build_keyword_page_snapshots(urls: list[str]) -> dict[str, dict[str, str]]:
+    snapshots: dict[str, dict[str, str]] = {}
+    unique_urls = list(dict.fromkeys(urls))[:20]
+    with ThreadPoolExecutor(max_workers=min(6, len(unique_urls) or 1)) as executor:
+        results = executor.map(fetch_page_seo_snapshot, unique_urls)
+    for url, snapshot in zip(unique_urls, results):
+        if snapshot:
+            snapshots[url] = snapshot
+    return snapshots
+
+
+def fetch_page_seo_snapshot(url: str) -> dict[str, str]:
+    html = fetch_cached_page_html(url)
+    if not html:
+        return {}
+    soup = BeautifulSoup(html, "html.parser")
+    h1 = ""
+    h1_tag = soup.find("h1")
+    if h1_tag:
+        h1 = normalize_text(h1_tag.get_text(" "))
+    paragraphs = [normalize_text(tag.get_text(" ")) for tag in soup.find_all("p")[:12]]
+    word_count = len(" ".join(paragraphs).split())
+    return {
+        "title": normalize_text(soup.title.string if soup.title else ""),
+        "meta": meta_content(soup, "description"),
+        "h1": h1,
+        "word_count": str(word_count),
+    }
+
+
 def extract_content_keywords(urls: list[str]) -> list[dict[str, Any]]:
     if not yake or not urls:
         return []
 
     extractor = yake.KeywordExtractor(lan="en", n=3, dedupLim=0.9, top=14)
     scored: dict[str, dict[str, Any]] = {}
-    for url in urls:
-        content = fetch_keyword_source_text(url)
+    unique_urls = list(dict.fromkeys(urls))[:12]
+    with ThreadPoolExecutor(max_workers=min(6, len(unique_urls) or 1)) as executor:
+        contents = executor.map(fetch_keyword_source_text, unique_urls)
+    for url, content in zip(unique_urls, contents):
         if len(content) < 80:
             continue
         try:
@@ -2308,21 +3416,10 @@ def extract_content_keywords(urls: list[str]) -> list[dict[str, Any]]:
 
 
 def fetch_keyword_source_text(url: str) -> str:
-    try:
-        response = requests.get(
-            url,
-            timeout=5,
-            headers={"User-Agent": "OpenAuditBot/1.0"},
-            allow_redirects=True,
-        )
-        response.raise_for_status()
-    except requests.RequestException:
+    html = fetch_cached_page_html(url)
+    if not html:
         return ""
-    content_type = response.headers.get("content-type", "")
-    if "html" not in content_type.lower():
-        return ""
-
-    soup = BeautifulSoup(response.text, "html.parser")
+    soup = BeautifulSoup(html, "html.parser")
     for node in soup(["script", "style", "noscript", "svg"]):
         node.decompose()
     parts = [
@@ -2335,6 +3432,35 @@ def fetch_keyword_source_text(url: str) -> str:
     parts.extend(normalize_text(tag.get("alt", "")) for tag in soup.find_all("img")[:20])
     parts.extend(normalize_text(tag.get_text(" ")) for tag in soup.find_all("p")[:24])
     return " ".join(part for part in parts if part)
+
+
+def fetch_cached_page_html(url: str) -> str:
+    now = time.monotonic()
+    cached = _PAGE_HTML_CACHE.get(url)
+    if cached and now - cached[0] < (900 if cached[1] else 60):
+        return cached[1]
+    try:
+        response = requests.get(
+            url,
+            timeout=3,
+            headers={"User-Agent": "OpenAuditBot/1.0"},
+            allow_redirects=True,
+        )
+        response.raise_for_status()
+    except requests.RequestException:
+        _PAGE_HTML_CACHE[url] = (now, "")
+        return ""
+    content_type = response.headers.get("content-type", "")
+    if "html" not in content_type.lower():
+        _PAGE_HTML_CACHE[url] = (now, "")
+        return ""
+    html = response.text
+    _PAGE_HTML_CACHE[url] = (now, html)
+    if len(_PAGE_HTML_CACHE) > 300:
+        oldest = sorted(_PAGE_HTML_CACHE, key=lambda key: _PAGE_HTML_CACHE[key][0])[:50]
+        for key in oldest:
+            _PAGE_HTML_CACHE.pop(key, None)
+    return html
 
 
 def normalize_keyword_phrase(value: str) -> str:
@@ -2363,12 +3489,96 @@ def keyword_tokens(value: str) -> list[str]:
     return tokens
 
 
+def keyword_candidate_is_useful(
+    raw_keyword: str,
+    target_phrase: str,
+    page: str,
+    metrics: dict[str, str] | None = None,
+) -> bool:
+    raw_tokens = keyword_tokens(raw_keyword)
+    target_tokens = keyword_tokens(target_phrase)
+    metrics = metrics or {}
+    if len(target_tokens) < 2:
+        return False
+    if len(raw_tokens) == 1 and keyword_token_is_spec(raw_tokens[0]):
+        return False
+
+    host_root = site_label(page).lower().replace("www.", "").split(".")[0]
+    compact_raw = "".join(raw_tokens)
+    if compact_raw and host_root:
+        brand_fragment = all(token in host_root for token in raw_tokens)
+        if brand_fragment and len(compact_raw) >= max(5, len(host_root) // 2):
+            return False
+
+    if "company" in raw_tokens:
+        return False
+    if raw_tokens and set(raw_tokens).issubset(KEYWORD_GENERIC_PHRASE_TOKENS | {"led"}):
+        return False
+
+    has_product_noun = bool(set(target_tokens) & KEYWORD_PRODUCT_NOUNS)
+    has_real_query = bool(str(metrics.get("query") or "").strip())
+    is_informational = any(
+        token in target_tokens
+        for token in {"best", "choose", "compare", "guide", "how", "install", "wire"}
+    )
+    return has_product_noun or has_real_query or is_informational
+
+
+def keyword_token_is_spec(token: str) -> bool:
+    return bool(
+        re.fullmatch(
+            r"(?:\d+(?:\.\d+)?(?:v|w|kw|lm|mm|cm|amp|amps|pk)|\d+x\d+)",
+            str(token or "").lower(),
+        )
+    )
+
+
+def page_specific_keyword_phrase(
+    keyword: str,
+    page: str,
+    page_snapshot: dict[str, str] | None = None,
+) -> str:
+    page_snapshot = page_snapshot or {}
+    path = urlparse(page).path.lower()
+    source = str(page_snapshot.get("h1") or path.rsplit("/", 1)[-1]).lower()
+    source = re.sub(r"[^a-z0-9]+", " ", source).strip()
+    source_tokens = source.split()
+
+    if "product" in path and any(token in source_tokens for token in {"lightbar", "lightbars"}):
+        size_match = re.search(r"\b(\d{1,3})\s*(?:inch|in)\b", source)
+        descriptors = []
+        for token in source_tokens:
+            normalized = "beam" if token == "beams" else token
+            if normalized in {"slimline", "combo", "beam", "curved", "dual", "single", "double", "mini"}:
+                if normalized not in descriptors:
+                    descriptors.append(normalized)
+        parts = []
+        if size_match:
+            parts.append(f"{size_match.group(1)} inch")
+        parts.extend(descriptors[:2])
+        parts.append("LED light bar")
+        return " ".join(parts)
+
+    if "product" in path and "stop" in source_tokens and "tail" in source_tokens:
+        series_match = re.search(r"\b(\d{2,4})\s*series\b", source)
+        prefix = f"{series_match.group(1)} Series " if series_match else ""
+        return f"{prefix}LED stop tail indicator lamp".strip()
+
+    if "product" in path and "marker" in source_tokens and "reflector" in source_tokens:
+        return "LED marker reflector light"
+    if "product" in path and any(token in source_tokens for token in {"worklight", "worklights"}):
+        return "LED work light"
+    return recommended_keyword_phrase(keyword, page)
+
+
 def keyword_source_label(
-    sitemap_urls: list[str], content_keywords: list[dict[str, Any]]
+    sitemap_urls: list[str], crawl_urls: list[str], content_keywords: list[dict[str, Any]]
 ) -> str:
     sources = []
     if content_keywords:
         sources.append("YAKE content extraction")
+    if crawl_urls:
+        sources.append("Crawl inventory")
     if sitemap_urls:
         sources.append("Sitemap")
     sources.append("Lighthouse report")
@@ -2394,6 +3604,186 @@ def build_search_console_summary(site_url: str) -> dict[str, Any]:
             else "Use these real queries to validate which keyword suggestions deserve content updates first."
         ),
     }
+
+
+def load_keyword_crawl_urls(final_url: str, limit: int = 120) -> list[str]:
+    website_key = site_key(final_url)
+    if not website_key:
+        return []
+    urls: list[str] = []
+    for page in list_crawl_pages(website_key, limit):
+        url = str(page.get("url") or "").strip()
+        content_type = str(page.get("content_type") or "").lower()
+        status_code = safe_int(page.get("status_code"))
+        if not url.startswith(("http://", "https://")):
+            continue
+        if content_type and "html" not in content_type:
+            continue
+        if status_code and status_code >= 400:
+            continue
+        urls.append(url)
+    return urls
+
+
+def build_keyword_source_urls(
+    final_url: str, crawl_urls: list[str], sitemap_urls: list[str]
+) -> list[str]:
+    ordered = [final_url] + crawl_urls + sitemap_urls
+    seen: set[str] = set()
+    urls: list[str] = []
+    for url in ordered:
+        clean = str(url or "").strip()
+        if not clean or clean in seen:
+            continue
+        seen.add(clean)
+        urls.append(clean)
+    return urls
+
+
+def build_search_console_actions(
+    rows: list[dict[str, str]],
+    page_snapshots: dict[str, dict[str, str]],
+    issues: list[dict[str, Any]],
+) -> list[dict[str, str]]:
+    actions = []
+    for row in sorted(
+        rows,
+        key=lambda item: (
+            safe_int(item.get("impressions")),
+            safe_int(item.get("clicks")),
+            -safe_float(item.get("position")) if item.get("position") else 0,
+        ),
+        reverse=True,
+    ):
+        query = str(row.get("query") or "").strip()
+        page = str(row.get("page") or "").strip()
+        if not query or not page:
+            continue
+        snapshot = page_snapshots.get(page) or {}
+        page_issues = keyword_relevant_issues(page, issues)
+        focus = keyword_focus_area(snapshot, page_issues, page)
+        decision = keyword_strategy_decision(query, page, snapshot, row)
+        decision_label = keyword_decision_summary(query, page, snapshot, row, page_issues)
+        confidence = keyword_decision_confidence(query, page, snapshot, row, page_issues)
+        content_brief = (
+            keyword_supporting_content_brief(query, page, row)
+            if decision == "Create supporting content"
+            else {}
+        )
+        actions.append(
+            {
+                "query": query,
+                "page": page,
+                "clicks": row.get("clicks", "-"),
+                "impressions": row.get("impressions", "-"),
+                "ctr": row.get("ctr", "-"),
+                "position": row.get("position", "-"),
+                "focus": focus,
+                "decision": decision,
+                "decision_label": decision_label,
+                "confidence": confidence,
+                "confidence_class": keyword_confidence_class(confidence),
+                "content_brief": content_brief,
+                "priority": search_console_priority(row, snapshot),
+                "why_now": search_console_why_now(row, snapshot, page_issues),
+                "action": search_console_action(query, page, snapshot, focus),
+                "current_title": snapshot.get("title", ""),
+                "current_h1": snapshot.get("h1", ""),
+                "current_meta": snapshot.get("meta", ""),
+                "related_issues": build_related_issue_refs(page, focus, page_issues),
+            }
+        )
+        if len(actions) >= 6:
+            break
+    return actions
+
+
+def import_search_console_csv(upload: Any, selected_site: dict[str, str]) -> dict[str, int | str]:
+    raw = upload.read(MAX_SEARCH_CONSOLE_UPLOAD_BYTES + 1)
+    if not raw:
+        raise ValueError("The CSV file is empty.")
+    if len(raw) > MAX_SEARCH_CONSOLE_UPLOAD_BYTES:
+        raise ValueError("The CSV file is larger than 2 MB.")
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise ValueError("Save the CSV as UTF-8 and try again.") from exc
+    if "\x00" in text:
+        raise ValueError("The uploaded file is not a valid text CSV.")
+
+    reader = csv.DictReader(io.StringIO(text))
+    normalized_fields = {
+        normalize_column_name(field)
+        for field in (reader.fieldnames or [])
+        if field
+    }
+    has_query_column = bool(normalized_fields.intersection({"query", "top_queries", "queries", "keyword", "search_term"}))
+    has_page_column = bool(normalized_fields.intersection({"page", "top_pages", "pages", "url", "landing_page"}))
+    if not has_query_column and not has_page_column:
+        raise ValueError("The CSV needs a Query or Page column.")
+
+    expected_url = str(selected_site.get("url") or "")
+    expected_host = site_label(expected_url).lower().replace("www.", "")
+    valid_rows: list[dict[str, str]] = []
+    skipped = 0
+    for index, row in enumerate(reader, start=1):
+        if index > MAX_SEARCH_CONSOLE_ROWS:
+            raise ValueError(f"The CSV contains more than {MAX_SEARCH_CONSOLE_ROWS:,} rows.")
+        normalized = normalize_search_console_row(row)
+        query = str(normalized.get("query") or "").strip()
+        page = str(normalized.get("page") or "").strip()
+        if not query and page:
+            normalized["query"] = infer_query_from_search_console_page(page)
+            normalized["source_type"] = "page"
+            query = normalized["query"]
+        if not query:
+            skipped += 1
+            continue
+        if page:
+            page_host = site_label(page).lower().replace("www.", "")
+            if not page_host or page_host != expected_host:
+                skipped += 1
+                continue
+        valid_rows.append(normalized)
+
+    if not valid_rows:
+        raise ValueError("No valid rows matched the selected website.")
+
+    output = io.StringIO()
+    writer = csv.DictWriter(
+        output,
+        fieldnames=["Query", "Page", "Clicks", "Impressions", "CTR", "Position", "Source Type"],
+        lineterminator="\n",
+    )
+    writer.writeheader()
+    for row in valid_rows:
+        writer.writerow(
+            {
+                "Query": row.get("query", ""),
+                "Page": row.get("page", ""),
+                "Clicks": row.get("clicks", ""),
+                "Impressions": row.get("impressions", ""),
+                "CTR": row.get("ctr", ""),
+                "Position": row.get("position", ""),
+                "Source Type": row.get("source_type", "query"),
+            }
+        )
+
+    directory = SEARCH_CONSOLE_DIRS[0]
+    filename = f"gsc-{selected_site['key']}.csv"
+    target = directory / filename
+    temporary = directory / f".{filename}.tmp"
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        temporary.write_text(output.getvalue(), encoding="utf-8", newline="")
+        temporary.replace(target)
+    except OSError as exc:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise ValueError("The Search Console storage folder is not writable.") from exc
+    return {"rows": len(valid_rows), "skipped": skipped, "filename": filename}
 
 
 def load_search_console_rows(site_url: str) -> list[dict[str, str]]:
@@ -2442,7 +3832,21 @@ def normalize_search_console_row(raw: dict[str, str]) -> dict[str, str]:
         "impressions": normalize_number_text(impressions),
         "ctr": ctr,
         "position": normalize_position_text(position),
+        "source_type": first_present(normalized, ["source_type", "source"]),
     }
+
+
+def infer_query_from_search_console_page(page: str) -> str:
+    parsed = urlparse(str(page or ""))
+    path = parsed.path.strip("/")
+    if not path:
+        host_label = parsed.netloc.split(":")[0].replace("www.", "")
+        return host_label.split(".")[0].replace("-", " ").strip()
+    last_segment = path.split("/")[-1]
+    words = re.sub(r"[^a-zA-Z0-9]+", " ", last_segment).strip().lower()
+    words = re.sub(r"\b(product|products|collection|collections|page|au)\b", "", words)
+    words = re.sub(r"\s+", " ", words).strip()
+    return words or path.replace("/", " ").replace("-", " ").strip().lower()
 
 
 def normalize_column_name(value: str) -> str:
@@ -2484,6 +3888,13 @@ def safe_int(value: Any) -> int:
         return 0
 
 
+def safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(str(value or "0").replace(",", "").replace("%", ""))
+    except ValueError:
+        return default
+
+
 def search_console_source_label(site_url: str, rows: list[dict[str, str]] | None = None) -> str:
     row_files = sorted({row.get("source_file", "") for row in (rows or []) if row.get("source_file")})
     if row_files:
@@ -2523,6 +3934,7 @@ def match_search_console_metrics(
     if best_score <= 0:
         return {}
     return {
+        "query": best.get("query", "") or "",
         "clicks": best.get("clicks", "") or "-",
         "impressions": best.get("impressions", "") or "-",
         "ctr": best.get("ctr", "") or "-",
@@ -2541,8 +3953,23 @@ def classify_keyword_intent(page: str, keyword: str) -> str:
     return "Landing page"
 
 
-def keyword_opportunity(keyword: str, issues: list[dict[str, Any]]) -> str:
+def keyword_opportunity(
+    keyword: str,
+    issues: list[dict[str, Any]],
+    page_snapshot: dict[str, str] | None = None,
+    metrics: dict[str, str] | None = None,
+) -> str:
     issue_text = " ".join(str(issue.get("title") or "").lower() for issue in issues)
+    page_snapshot = page_snapshot or {}
+    metrics = metrics or {}
+    if metrics.get("position") and safe_float(metrics.get("position")) > 8:
+        return "Improve ranking on an already-impressing query"
+    if not page_snapshot.get("title"):
+        return "Add stronger page title"
+    if not page_snapshot.get("meta"):
+        return "Add stronger meta description"
+    if not page_snapshot.get("h1"):
+        return "Align page heading"
     if "meta description" in issue_text:
         return "Add stronger meta description"
     if "document title" in issue_text or "title" in issue_text:
@@ -2552,18 +3979,283 @@ def keyword_opportunity(keyword: str, issues: list[dict[str, Any]]) -> str:
     return "Strengthen copy and internal links"
 
 
+def keyword_strategy_decision(
+    keyword: str,
+    page: str,
+    page_snapshot: dict[str, str] | None = None,
+    metrics: dict[str, str] | None = None,
+) -> str:
+    page_snapshot = page_snapshot or {}
+    metrics = metrics or {}
+    query = str(metrics.get("query") or "").strip()
+    impressions = safe_int(metrics.get("impressions"))
+    position = safe_float(metrics.get("position"))
+    word_count = safe_int(page_snapshot.get("word_count"))
+    intent = classify_keyword_intent(page, keyword)
+    has_core_fields = bool(
+        page_snapshot.get("title") and page_snapshot.get("meta") and page_snapshot.get("h1")
+    )
+
+    if (
+        intent == "Informational"
+        and (query or keyword_word_count(keyword) >= 3)
+        and (word_count < 160 or not has_core_fields)
+    ):
+        return "Create supporting content"
+
+    if query and impressions >= 100 and has_core_fields and word_count >= 220 and 1 <= position <= 6:
+        return "Keep"
+
+    if query and impressions >= 100 and (
+        not page_snapshot.get("title")
+        or not page_snapshot.get("meta")
+        or not page_snapshot.get("h1")
+    ):
+        return "Improve existing page"
+    if intent in {"Product", "Category", "Landing page"}:
+        return "Improve existing page"
+    if word_count >= 220 and has_core_fields:
+        return "Keep"
+    return "Create supporting content"
+
+
+def keyword_supporting_content_type(
+    keyword: str,
+    page: str,
+    metrics: dict[str, str] | None = None,
+) -> str:
+    metrics = metrics or {}
+    phrase = f"{keyword} {metrics.get('query', '')}".lower()
+    page_path = urlparse(page).path.lower()
+    if any(term in phrase for term in ["how", "install", "wire", "setup", "troubleshoot"]):
+        return "Create how-to guide"
+    if any(term in phrase for term in ["faq", "questions", "difference", "vs", "compare", "comparison"]):
+        return "Create FAQ or comparison content"
+    if any(term in phrase for term in ["best", "top", "choose", "buying", "selection"]):
+        return "Create buying guide"
+    if "category" in page_path or "collection" in page_path:
+        return "Create category support content"
+    return "Create supporting content"
+
+
+def keyword_supporting_content_brief(
+    keyword: str,
+    page: str,
+    metrics: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    metrics = metrics or {}
+    seed = str(metrics.get("query") or keyword).strip() or keyword
+    phrase = recommended_keyword_phrase(seed, page)
+    content_type = keyword_supporting_content_type(seed, page, metrics)
+    page_path = urlparse(page).path or page
+
+    if "how-to" in content_type:
+        title = f"How to use {phrase}"
+        angle = "Answer setup, installation, and troubleshooting questions before sending users to the product page."
+        sections = [
+            f"When {phrase} is the right fit",
+            "Step-by-step setup checklist",
+            "Common mistakes, compatibility notes, and safety checks",
+        ]
+    elif "FAQ" in content_type or "comparison" in content_type:
+        title = f"{phrase}: questions buyers ask before choosing"
+        angle = "Capture comparison and pre-purchase questions that are too detailed for a short product/category page."
+        sections = [
+            f"What {phrase} is best used for",
+            "How it compares with close alternatives",
+            "Buying questions, fitment notes, and warranty considerations",
+        ]
+    elif "buying guide" in content_type:
+        title = f"How to choose {phrase}"
+        angle = "Turn a broad commercial keyword into a buyer guide that supports category and product pages."
+        sections = [
+            "Key buying criteria",
+            "Recommended product types by use case",
+            "Short checklist before ordering",
+        ]
+    elif "category" in content_type:
+        title = f"{phrase} buying and fitment guide"
+        angle = "Support the category page with practical guidance instead of overloading the category intro."
+        sections = [
+            "Best use cases",
+            "Fitment and specification checklist",
+            "Products or categories to link next",
+        ]
+    else:
+        title = f"{phrase} guide"
+        angle = "Create a focused support page that answers intent the current landing page does not fully cover."
+        sections = [
+            "What users are trying to solve",
+            "Recommended options or next steps",
+            "Related products, categories, or service pages",
+        ]
+
+    return {
+        "type": content_type,
+        "title": title,
+        "angle": angle,
+        "sections": sections,
+        "internal_link": f"Link back to {page_path} using natural anchor text like '{phrase}'.",
+        "validation": "After publishing, re-run the crawl and check whether the keyword now has a clearer target page.",
+    }
+
+
+def keyword_confidence_class(confidence: str) -> str:
+    normalized = str(confidence or "").strip().lower()
+    if "high" in normalized:
+        return "high"
+    if "medium" in normalized:
+        return "medium"
+    return "needs-data"
+
+
+def keyword_decision_confidence(
+    keyword: str,
+    page: str,
+    page_snapshot: dict[str, str] | None = None,
+    metrics: dict[str, str] | None = None,
+    issues: list[dict[str, Any]] | None = None,
+) -> str:
+    page_snapshot = page_snapshot or {}
+    metrics = metrics or {}
+    issues = issues or []
+    query = str(metrics.get("query") or "").strip()
+    impressions = safe_int(metrics.get("impressions"))
+    has_core_fields = bool(
+        page_snapshot.get("title") and page_snapshot.get("meta") and page_snapshot.get("h1")
+    )
+    decision = keyword_strategy_decision(keyword, page, page_snapshot, metrics)
+    if query and impressions >= 100 and has_core_fields:
+        return "High confidence"
+    if query:
+        return "Medium confidence"
+    if decision == "Improve existing page" and page_snapshot:
+        return "Medium confidence"
+    if decision.startswith("Create") and keyword_word_count(keyword) >= 3:
+        return "Medium confidence"
+    return "Needs real search data"
+
+
+def keyword_why_it_matters(
+    keyword: str,
+    page: str,
+    page_snapshot: dict[str, str] | None = None,
+    metrics: dict[str, str] | None = None,
+    issues: list[dict[str, Any]] | None = None,
+) -> str:
+    page_snapshot = page_snapshot or {}
+    metrics = metrics or {}
+    issues = issues or []
+    relevant_issues = keyword_relevant_issues(page, issues)
+    query = str(metrics.get("query") or "").strip()
+    impressions = safe_int(metrics.get("impressions"))
+    position = safe_float(metrics.get("position"))
+    decision = keyword_strategy_decision(keyword, page, page_snapshot, metrics)
+    if decision == "Create supporting content":
+        return "The current page does not look like a strong match for this search theme yet, so a supporting guide, FAQ, or category intro may serve the topic better than a small metadata edit."
+    if decision == "Keep":
+        return "This page already looks like a strong match for the topic, so it may be better to protect the page and focus effort elsewhere unless performance drops."
+    if query and impressions >= 100:
+        return f"This page already appears for '{query}', so improving the page match could turn existing visibility into more clicks."
+    if position and position > 8:
+        return f"This page is already showing in search around position {position:.1f}, so metadata and content improvements may unlock easier gains than building a new page."
+    if not page_snapshot.get("title") or not page_snapshot.get("meta") or not page_snapshot.get("h1"):
+        return "This page is missing one or more basic SEO fields, so it is a practical on-page improvement instead of a bigger content project."
+    if len(relevant_issues) >= 2:
+        return "This topic overlaps with existing SEO issues, so fixing the page can improve both search clarity and the site quality score."
+    return f"This keyword matches the page theme, so tightening the page can make the topic clearer for both users and search engines."
+
+
+def keyword_decision_summary(
+    keyword: str,
+    page: str,
+    page_snapshot: dict[str, str] | None = None,
+    metrics: dict[str, str] | None = None,
+    issues: list[dict[str, Any]] | None = None,
+) -> str:
+    decision = keyword_strategy_decision(keyword, page, page_snapshot, metrics)
+    if decision == "Create supporting content":
+        return keyword_supporting_content_type(keyword, page, metrics)
+    return decision
+
+
+def keyword_edit_brief(keyword: str, page: str, focus: str, decision: str) -> dict[str, str]:
+    phrase = recommended_keyword_phrase(keyword, page)
+    if decision == "Keep":
+        return {
+            "title": "Protect the current page",
+            "do": "Keep the core title, H1, and intent stable. Only make small copy improvements if the scan finds a clear issue.",
+            "avoid": "Do not rewrite a page that already has a clear topic unless rankings, clicks, or issue counts drop.",
+            "validation": "Re-scan after any small edit and confirm the score does not regress.",
+        }
+    if decision == "Create supporting content":
+        return {
+            "title": "Create a clearer target for this topic",
+            "do": f"Draft a focused support page or section for '{phrase}', then link it from the closest category or product page.",
+            "avoid": "Do not force a broad informational query into a short product page if the intent needs explanation.",
+            "validation": "Re-scan after publishing and check that the new page appears in the keyword-to-page map.",
+        }
+    if focus == "Title tag":
+        return {
+            "title": "Rewrite the title first",
+            "do": f"Lead the title with '{phrase}', then add the product/category benefit and brand if there is room.",
+            "avoid": "Avoid repeating the same phrase twice or writing a title that no longer matches the visible page.",
+            "validation": "The title is unique, under roughly 60 characters, and matches the H1/page intent.",
+        }
+    if focus == "Meta description":
+        return {
+            "title": "Improve the search snippet",
+            "do": f"Write a concise meta description that uses '{phrase}' once and explains why this page is useful.",
+            "avoid": "Avoid keyword stuffing or a generic description that could apply to any page.",
+            "validation": "The meta description is unique, useful, and roughly 120-160 characters.",
+        }
+    if focus == "Heading structure":
+        return {
+            "title": "Align the visible heading",
+            "do": f"Make the H1 clearly describe '{phrase}' and keep supporting headings in a logical order.",
+            "avoid": "Avoid multiple competing H1s or headings that look decorative but do not describe the content.",
+            "validation": "The scan no longer reports heading order or missing H1 issues for this page.",
+        }
+    if focus == "Supporting copy":
+        return {
+            "title": "Add useful body copy",
+            "do": f"Add a short intro or buying note that explains '{phrase}' in plain language before the product grid.",
+            "avoid": "Avoid thin copy that only repeats keywords without helping the buyer choose.",
+            "validation": "The page has enough unique text to explain the topic and support internal links.",
+        }
+    return {
+        "title": "Strengthen topical signals",
+        "do": f"Use '{phrase}' naturally in the most visible page fields and link from related pages.",
+        "avoid": "Avoid creating duplicate pages that target the same phrase without a clear purpose.",
+        "validation": "The page has a clear target phrase, unique metadata, and no new quality issues.",
+    }
+
+
 def keyword_score_gain(
-    keyword: str, count: int, affected_pages: int, issues: list[dict[str, Any]]
+    keyword: str,
+    count: int,
+    affected_pages: int,
+    issues: list[dict[str, Any]],
+    metrics: dict[str, str] | None = None,
 ) -> float:
+    metrics = metrics or {}
     issue_bonus = min(len(issues) * 0.05, 0.7)
     page_bonus = min(affected_pages * 0.06, 1.2)
     keyword_bonus = 0.25 if len(keyword) >= 6 else 0.1
-    return round(0.35 + page_bonus + issue_bonus + keyword_bonus + min(count * 0.03, 0.5), 2)
+    impressions_bonus = min(safe_int(metrics.get("impressions")) / 500, 0.9)
+    position_bonus = 0.45 if 4 <= safe_float(metrics.get("position")) <= 20 else 0
+    return round(0.35 + page_bonus + issue_bonus + keyword_bonus + impressions_bonus + position_bonus + min(count * 0.03, 0.5), 2)
 
 
 def keyword_difficulty(
-    keyword: str, affected_pages: int, issues: list[dict[str, Any]]
+    keyword: str,
+    affected_pages: int,
+    issues: list[dict[str, Any]],
+    metrics: dict[str, str] | None = None,
 ) -> str:
+    metrics = metrics or {}
+    if safe_int(metrics.get("impressions")) >= 500 and safe_float(metrics.get("position")) > 12:
+        return "Medium"
     if affected_pages <= 2 and len(issues) <= 3:
         return "Low"
     if affected_pages <= 8:
@@ -2588,13 +4280,157 @@ def keyword_reason(
     return f"Found in the audited URL or metadata and worth validating against real search data."
 
 
-def keyword_action(keyword: str, page: str) -> str:
+def keyword_action(
+    keyword: str,
+    page: str,
+    page_snapshot: dict[str, str] | None = None,
+    metrics: dict[str, str] | None = None,
+) -> str:
     label = recommended_keyword_phrase(keyword, page)
+    page_snapshot = page_snapshot or {}
+    metrics = metrics or {}
+    decision = keyword_strategy_decision(keyword, page, page_snapshot, metrics)
+    if decision == "Create supporting content":
+        return f"Create a supporting content block or new landing page for '{label}', then link it clearly from this page so the topic has a stronger home."
+    if decision == "Keep":
+        return f"Keep this page stable for '{label}', monitor search performance, and only make small refinements if rankings or clicks decline."
+    if metrics.get("query"):
+        return f"Treat '{metrics['query']}' as the live search phrase to support, then update the title, H1, meta description and intro copy on this page."
+    if not page_snapshot.get("title"):
+        return f"Add a page title that leads with '{label}' and matches what users expect to find on this page."
+    if not page_snapshot.get("meta"):
+        return f"Write a meta description for this page that uses '{label}' once and clearly states the page benefit."
+    if not page_snapshot.get("h1"):
+        return f"Add a clear H1 using '{label}' or a close variation that matches the page purpose."
     if classify_keyword_intent(page, keyword) == "Product":
         return f"Use '{label}' in the product title, first paragraph, image alt text and related-product links where accurate."
     if classify_keyword_intent(page, keyword) == "Category":
         return f"Use '{label}' in the category intro, title tag, H1 and internal links from related pages."
     return f"Use '{label}' naturally in the page title, H1, meta description and one useful supporting paragraph."
+
+
+def keyword_relevant_issues(
+    page: str,
+    issues: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not page:
+        return issues
+    matched: list[dict[str, Any]] = []
+    unscoped: list[dict[str, Any]] = []
+    for issue in issues:
+        normalized = normalize_issue_detail(issue)
+        if not normalized:
+            continue
+        examples = list(normalized.get("affected_examples") or [])
+        affected_urls = list(normalized.get("affected_urls") or [])
+        has_page_evidence = bool(
+            affected_urls
+            or any(str(example.get("page_url") or example.get("url") or "").strip() for example in examples)
+        )
+        if has_page_evidence:
+            if issue_matches_page(page, normalized):
+                matched.append(issue)
+        else:
+            unscoped.append(issue)
+    return matched or unscoped
+
+
+def keyword_focus_area(
+    page_snapshot: dict[str, str],
+    issues: list[dict[str, Any]],
+    page: str = "",
+) -> str:
+    relevant_issues = keyword_relevant_issues(page, issues)
+    issue_text = " ".join(str(issue.get("title") or "").lower() for issue in relevant_issues)
+    if not page_snapshot.get("title") or "document title" in issue_text:
+        return "Title tag"
+    if not page_snapshot.get("meta") or "meta description" in issue_text:
+        return "Meta description"
+    if not page_snapshot.get("h1") or "heading" in issue_text:
+        return "Heading structure"
+    if safe_int(page_snapshot.get("word_count")) < 180:
+        return "Supporting copy"
+    return "Internal linking"
+
+
+def keyword_why_now(
+    keyword: str,
+    page: str,
+    metrics: dict[str, str],
+    page_snapshot: dict[str, str],
+    issues: list[dict[str, Any]],
+) -> str:
+    relevant_issues = keyword_relevant_issues(page, issues)
+    query = metrics.get("query", "")
+    impressions = safe_int(metrics.get("impressions"))
+    position = safe_float(metrics.get("position"))
+    if query and impressions >= 100:
+        return f"Search Console already shows '{query}' with {impressions} impression(s), so this is not just a guess."
+    if position and position > 8:
+        return f"This page is already visible around position {position:.1f}, so better metadata or copy could move it higher."
+    if not page_snapshot.get("title") or not page_snapshot.get("meta") or not page_snapshot.get("h1"):
+        return "This page is missing basic SEO structure, so it is a good candidate for a first-pass content update."
+    if len(relevant_issues) >= 2:
+        return "This page theme overlaps with existing SEO issues, so fixing it can improve both quality score and search clarity."
+    return f"The phrase '{recommended_keyword_phrase(keyword, page)}' matches the page theme and can make the page clearer for both users and search engines."
+
+
+def keyword_priority_sort_key(row: dict[str, str]) -> tuple[float, int, int]:
+    return (
+        safe_float(row.get("score_gain")),
+        safe_int(row.get("impressions")),
+        -safe_float(row.get("position")) if row.get("position") not in {"", "-"} else 0,
+    )
+
+
+def search_console_priority(row: dict[str, str], snapshot: dict[str, str]) -> str:
+    impressions = safe_int(row.get("impressions"))
+    position = safe_float(row.get("position"))
+    if impressions >= 500 and position >= 5:
+        return "Highest impact"
+    if not snapshot.get("title") or not snapshot.get("meta") or not snapshot.get("h1"):
+        return "Quick win"
+    if impressions >= 100:
+        return "Promising"
+    return "Review"
+
+
+def search_console_why_now(
+    row: dict[str, str],
+    snapshot: dict[str, str],
+    issues: list[dict[str, Any]],
+) -> str:
+    query = str(row.get("query") or "")
+    impressions = safe_int(row.get("impressions"))
+    clicks = safe_int(row.get("clicks"))
+    position = safe_float(row.get("position"))
+    if not snapshot.get("title") or not snapshot.get("meta") or not snapshot.get("h1"):
+        return f"'{query}' already has real search visibility, and this landing page is still missing one or more core SEO fields."
+    if impressions >= 500 and position >= 8:
+        return f"'{query}' already generates {impressions} impression(s) and sits around position {position:.1f}, so a tighter page match could lift traffic."
+    if clicks == 0 and impressions >= 100:
+        return f"'{query}' is showing in search but not earning clicks yet, which usually means the page snippet or page match can improve."
+    if len(issues) >= 3:
+        return f"This page also overlaps with current SEO issues, so improving it for '{query}' should strengthen both relevance and site quality."
+    return f"'{query}' is a real query from Search Console, so this recommendation is grounded in search demand instead of guesswork."
+
+
+def search_console_action(
+    query: str,
+    page: str,
+    snapshot: dict[str, str],
+    focus: str,
+) -> str:
+    phrase = recommended_keyword_phrase(query, page)
+    if focus == "Title tag":
+        return f"Rewrite the page title so it leads with '{phrase}' and clearly matches the searcher intent behind '{query}'."
+    if focus == "Meta description":
+        return f"Write a more compelling meta description using '{phrase}' once and making the page benefit clearer."
+    if focus == "Heading structure":
+        return f"Align the H1 and visible page heading with '{phrase}' so the page topic is obvious to users and search engines."
+    if focus == "Supporting copy":
+        return f"Add a stronger intro section for '{phrase}' so the landing page better answers the query without stuffing keywords."
+    return f"Add internal links to this page using descriptive anchor text related to '{phrase}', especially from closely related pages."
 
 
 def recommended_keyword_phrase(keyword: str, page: str) -> str:
@@ -2628,6 +4464,10 @@ def recommended_keyword_phrase(keyword: str, page: str) -> str:
     return readable_phrase(keyword_tokens(keyword) or [keyword])
 
 
+def keyword_word_count(value: str) -> int:
+    return len(keyword_tokens(value))
+
+
 def readable_phrase(tokens: list[str]) -> str:
     replacements = {
         "ind": "indicator",
@@ -2646,17 +4486,33 @@ def readable_phrase(tokens: list[str]) -> str:
 
 
 def build_keyword_optimization_briefs(
-    pages: list[dict[str, str]], rows: list[dict[str, str]]
-) -> list[dict[str, str]]:
+    pages: list[dict[str, Any]], rows: list[dict[str, str]], brand_name: str
+) -> list[dict[str, Any]]:
     row_by_page = {row.get("page", ""): row for row in rows}
     briefs = []
     for item in pages[:6]:
         page = item.get("page", "")
         base_keyword = item.get("suggested_keyword", "")
-        keyword = recommended_keyword_phrase(base_keyword, page)
+        keyword = page_specific_keyword_phrase(
+            base_keyword,
+            page,
+            {"h1": item.get("current_h1", "")},
+        )
         intent = item.get("intent") or classify_keyword_intent(page, base_keyword)
         page_type = "collection" if intent == "Category" else "product" if intent == "Product" else "landing"
         row = row_by_page.get(page, {})
+        decision = item.get("decision", row.get("decision", "Improve existing page"))
+        decision_label = item.get(
+            "decision_label",
+            row.get("decision_label", decision),
+        )
+        confidence = item.get("confidence", row.get("confidence", "Needs real search data"))
+        focus = item.get("focus", row.get("focus", "On-page SEO"))
+        content_brief = item.get("content_brief") or row.get("content_brief") or (
+            keyword_supporting_content_brief(keyword, page, {"query": row.get("matched_query", "")})
+            if decision == "Create supporting content"
+            else {}
+        )
         briefs.append(
             {
                 "page": page,
@@ -2668,40 +4524,324 @@ def build_keyword_optimization_briefs(
                 "impressions": row.get("impressions", ""),
                 "ctr": row.get("ctr", ""),
                 "position": row.get("position", ""),
-                "title": seo_title_example(keyword),
+                "matched_query": row.get("matched_query", ""),
+                "why_now": item.get("why_now", row.get("why_now", "")),
+                "why_it_matters": item.get("why_it_matters", row.get("why_it_matters", "")),
+                "current_title": item.get("current_title", ""),
+                "current_h1": item.get("current_h1", ""),
+                "current_meta": item.get("current_meta", ""),
+                "focus": focus,
+                "decision": decision,
+                "decision_label": decision_label,
+                "confidence": confidence,
+                "confidence_class": keyword_confidence_class(confidence),
+                "content_brief": content_brief,
+                "edit_brief": keyword_edit_brief(keyword, page, focus, decision),
+                "title": seo_title_example(keyword, brand_name),
                 "h1": seo_h1_example(keyword),
-                "meta": seo_meta_example(keyword, page_type),
+                "meta": seo_meta_example(keyword, page_type, brand_name),
                 "intro": seo_intro_example(keyword, page_type),
                 "alt": seo_alt_example(keyword),
                 "internal_links": seo_internal_link_example(keyword, page_type),
+                "related_issues": item.get("related_issues", []),
             }
         )
     return briefs
 
 
-def seo_title_example(keyword: str) -> str:
-    return compact_text(f"{keyword} | TruVision LED", 62)
+def build_page_edit_queue(briefs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    queue = []
+    for brief in briefs[:6]:
+        tasks = []
+        current_title = str(brief.get("current_title") or "").strip()
+        current_h1 = str(brief.get("current_h1") or "").strip()
+        current_meta = str(brief.get("current_meta") or "").strip()
+
+        if not current_title or current_title != brief.get("title", ""):
+            suggested_title = str(brief.get("title", "") or "")
+            tasks.append(
+                {
+                    "label": "Title tag",
+                    "current": current_title or "Missing",
+                    "suggested": suggested_title,
+                    "guidance": "Copy this into the page SEO title field.",
+                    "metric": f"{len(suggested_title)} characters",
+                }
+            )
+        if not current_h1 or current_h1 != brief.get("h1", ""):
+            suggested_h1 = str(brief.get("h1", "") or "")
+            tasks.append(
+                {
+                    "label": "H1",
+                    "current": current_h1 or "Missing",
+                    "suggested": suggested_h1,
+                    "guidance": "Use this as the visible main heading if it still reads naturally.",
+                    "metric": f"{len(suggested_h1)} characters",
+                }
+            )
+        if not current_meta or current_meta != brief.get("meta", ""):
+            suggested_meta = str(brief.get("meta", "") or "")
+            tasks.append(
+                {
+                    "label": "Meta description",
+                    "current": current_meta or "Missing",
+                    "suggested": suggested_meta,
+                    "guidance": "Copy this into the CMS meta description or SEO description field.",
+                    "metric": f"{len(suggested_meta)} characters",
+                    "important": True,
+                }
+            )
+
+        suggested_intro = str(brief.get("intro", "") or "")
+        tasks.append(
+            {
+                "label": "Intro copy",
+                "current": "Needs editorial review",
+                "suggested": suggested_intro,
+                "guidance": "Add this as a short visible paragraph near the top of the page, then rewrite in your brand voice.",
+                "metric": "Visible page copy",
+            }
+        )
+
+        queue.append(
+            {
+                "page": brief.get("page", ""),
+                "keyword": brief.get("keyword", ""),
+                "priority": brief.get("priority", "Review"),
+                "points": brief.get("points", "0"),
+                "focus": brief.get("focus", "On-page SEO"),
+                "why_now": brief.get("why_now", ""),
+                "why_it_matters": brief.get("why_it_matters", ""),
+                "decision": brief.get("decision", "Improve existing page"),
+                "decision_label": brief.get("decision_label", brief.get("decision", "Improve existing page")),
+                "confidence": brief.get("confidence", "Needs real search data"),
+                "confidence_class": keyword_confidence_class(brief.get("confidence", "Needs real search data")),
+                "content_brief": brief.get("content_brief", {}),
+                "edit_brief": brief.get("edit_brief", {}),
+                "matched_query": brief.get("matched_query", ""),
+                "tasks": tasks[:4],
+                "related_issues": list(brief.get("related_issues") or [])[:3],
+            }
+        )
+    return queue
+
+
+def apply_keyword_action_states(
+    website_key_value: str,
+    *collections: list[dict[str, Any]],
+) -> dict[str, Any]:
+    saved_actions = {
+        str(action.get("action_key") or ""): action
+        for action in list_keyword_actions(website_key_value)
+        if action.get("action_key")
+    } if website_key_value else {}
+    visible_states: dict[str, str] = {}
+    for collection in collections:
+        for item in collection:
+            page_url = str(item.get("page") or item.get("page_url") or "").strip()
+            keyword = str(item.get("keyword") or item.get("suggested_keyword") or "").strip()
+            if not page_url or not keyword:
+                continue
+            action_key_value = keyword_action_key(page_url, keyword)
+            saved = saved_actions.get(action_key_value) or {}
+            workflow = {
+                "action_key": action_key_value,
+                "status": saved.get("status", "suggested"),
+                "owner": saved.get("owner", "Unassigned"),
+                "note": saved.get("note", ""),
+                "updated_at": saved.get("updated_at", ""),
+                "completed_at": saved.get("completed_at", ""),
+            }
+            item["workflow"] = workflow
+            visible_states[action_key_value] = str(workflow["status"])
+
+    counts = Counter(visible_states.values())
+    return {
+        "saved": len(saved_actions),
+        "visible": len(visible_states),
+        "suggested": counts.get("suggested", 0),
+        "accepted": counts.get("accepted", 0),
+        "in_progress": counts.get("in_progress", 0),
+        "completed": counts.get("completed", 0),
+        "ignored": counts.get("ignored", 0),
+    }
+
+
+def build_related_issue_refs(
+    page_url: str, focus: str, issues: list[dict[str, Any]], limit: int = 3
+) -> list[dict[str, str]]:
+    page_url = str(page_url or "").strip()
+    focus_tokens = related_issue_focus_tokens(focus)
+    ranked: list[tuple[float, dict[str, str]]] = []
+    seen: set[str] = set()
+
+    for issue in issues:
+        normalized = normalize_issue_detail(issue)
+        if not normalized:
+            continue
+        if not related_issue_is_allowed(normalized, focus_tokens):
+            continue
+
+        page_match = issue_matches_page(page_url, normalized)
+        focus_match = issue_matches_focus(focus_tokens, normalized)
+        if not page_match and not focus_match:
+            continue
+
+        issue_id = str(
+            normalized.get("id")
+            or normalized.get("audit_id")
+            or normalized.get("issue_key")
+            or ""
+        )
+        if not issue_id or issue_id in seen:
+            continue
+        seen.add(issue_id)
+
+        points = safe_float(normalized.get("points"), 0.0)
+        score = points
+        if page_match:
+            score += 100
+        if focus_match:
+            score += 25
+
+        ranked.append(
+            (
+                score,
+                {
+                    "id": issue_id,
+                    "title": str(normalized.get("title") or "Untitled issue"),
+                    "category": str(normalized.get("category") or "General"),
+                    "points": f"{points:.1f}",
+                    "href": str(normalized.get("href") or issue_href(issue_id, page_url or None)),
+                    "match": "This page" if page_match else "Related issue",
+                },
+            )
+        )
+
+    ranked.sort(key=lambda item: item[0], reverse=True)
+    return [item[1] for item in ranked[:limit]]
+
+
+def related_issue_focus_tokens(focus: str) -> set[str]:
+    focus = str(focus or "").strip().lower()
+    mapping = {
+        "title tag": {"document-title", "title", "browser title", "page title"},
+        "meta description": {"meta-description", "meta description", "description"},
+        "heading structure": {"heading-order", "heading", "multiple h1", "missing h1", "h1"},
+        "supporting copy": {"thin content", "content", "word count", "copy", "readability"},
+        "image alt": {"image-alt", "alt text", "image"},
+        "internal links": {"link-name", "link", "anchor", "internal link"},
+        "on-page seo": {
+            "document-title",
+            "meta-description",
+            "heading-order",
+            "missing h1",
+            "multiple h1",
+            "thin content",
+            "link-name",
+            "image-alt",
+            "title",
+            "meta",
+            "heading",
+            "copy",
+        },
+    }
+    return mapping.get(focus, {focus} if focus else set())
+
+
+def related_issue_is_allowed(issue: dict[str, Any], focus_tokens: set[str]) -> bool:
+    category = str(issue.get("category") or "").strip().lower()
+    issue_id = str(issue.get("id") or issue.get("audit_id") or issue.get("issue_key") or "").lower()
+    source = str(issue.get("source") or "").strip().lower()
+    allowed_categories = {"seo", "content quality", "accessibility"}
+    allowed_sources = {"content", "pa11y", "lighthouse", "lhci"}
+    allowed_issue_tokens = {
+        "document-title",
+        "meta-description",
+        "heading-order",
+        "multiple-h1",
+        "missing-h1",
+        "link-name",
+        "image-alt",
+        "html-has-lang",
+        "content-thin-page",
+        "content-missing-title",
+        "content-title-length",
+        "content-duplicate-title",
+        "content-missing-meta-description",
+        "content-meta-length",
+        "content-duplicate-meta-description",
+        "content-missing-h1",
+        "content-multiple-h1",
+        "content-missing-language",
+    }
+    if category in allowed_categories:
+        return True
+    if source in allowed_sources and any(token in issue_id for token in allowed_issue_tokens):
+        return True
+    return any(token in issue_id for token in focus_tokens if token)
+
+
+def issue_matches_focus(tokens: set[str], issue: dict[str, Any]) -> bool:
+    if not tokens:
+        return False
+    haystack = " ".join(
+        [
+            str(issue.get("id") or ""),
+            str(issue.get("audit_id") or ""),
+            str(issue.get("issue_key") or ""),
+            str(issue.get("title") or ""),
+            str(issue.get("category") or ""),
+            str(issue.get("recommendation") or ""),
+        ]
+    ).lower()
+    return any(token in haystack for token in tokens if token)
+
+
+def issue_matches_page(page_url: str, issue: dict[str, Any]) -> bool:
+    if not page_url:
+        return False
+    normalized_page = page_url.rstrip("/").lower()
+    candidates = [str(issue.get("page_url") or "")]
+    for collection_name in ("affected_examples", "evidence"):
+        for item in issue.get(collection_name, []) or []:
+            if isinstance(item, dict):
+                candidates.append(str(item.get("page_url") or item.get("url") or ""))
+    return any(candidate.rstrip("/").lower() == normalized_page for candidate in candidates if candidate)
+
+
+def seo_title_example(keyword: str, brand_name: str) -> str:
+    return compact_text(f"{keyword} | {brand_name}", 62)
 
 
 def seo_h1_example(keyword: str) -> str:
-    return keyword
+    return keyword[:1].upper() + keyword[1:] if keyword else keyword
 
 
-def seo_meta_example(keyword: str, page_type: str) -> str:
+def seo_meta_example(keyword: str, page_type: str, brand_name: str) -> str:
     if page_type == "collection":
-        text = f"Shop {keyword} for trucks, trailers, caravans and commercial vehicles. Explore durable automotive lighting from TruVision LED."
+        text = f"Shop {keyword} for trucks, trailers and commercial vehicles, with durable automotive lighting options from {brand_name}."
     elif page_type == "product":
-        text = f"View {keyword} with specifications, voltage range and fitment details. Built for reliable automotive and commercial vehicle lighting."
+        text = f"View {keyword} specs, voltage range and fitment details for reliable automotive and commercial vehicle lighting from {brand_name}."
     else:
-        text = f"Learn about {keyword}, compare suitable options and find reliable TruVision LED lighting for your vehicle or fleet."
-    return compact_text(text, 158)
+        text = f"Learn about {keyword}, compare suitable options and find reliable {brand_name} lighting for your vehicle or fleet."
+    return complete_sentence(text, 155)
+
+
+def complete_sentence(text: str, limit: int) -> str:
+    """Keep CMS-ready copy readable; never end SEO text with a broken word or ellipsis."""
+    cleaned = " ".join(str(text or "").split())
+    if len(cleaned) <= limit:
+        return cleaned if cleaned.endswith((".", "!", "?")) else f"{cleaned}."
+    shortened = cleaned[: max(limit - 1, 0)].rsplit(" ", 1)[0].rstrip(" ,;:-")
+    return f"{shortened}."
 
 
 def seo_intro_example(keyword: str, page_type: str) -> str:
     if page_type == "collection":
         return f"Add a short intro above the product grid explaining who {keyword} are for, common vehicle uses, voltage range, durability and why customers should choose this range."
     if page_type == "product":
-        return f"Add one paragraph near the top describing the main use case for this {keyword}, key specifications, installation context and compatible vehicle applications."
+        return f"Add one paragraph near the top explaining who this product is for, where {keyword} is used, the key specifications, installation context and compatible vehicle applications."
     return f"Add helpful copy that explains the buyer problem, compares options and naturally uses '{keyword}' once near the start."
 
 
@@ -2763,22 +4903,56 @@ def build_keyword_activity_plan(
 
 
 def build_page_keyword_opportunities(
-    urls: list[str], issues: list[dict[str, Any]]
+    urls: list[str],
+    issues: list[dict[str, Any]],
+    search_rows: list[dict[str, str]],
+    page_snapshots: dict[str, dict[str, str]],
 ) -> list[dict[str, str]]:
     rows = []
-    seen = set()
+    seen_pages = set()
     for url in urls:
-        phrase = suggested_phrase_from_url(url)
-        if not phrase or phrase in seen:
+        if url in seen_pages:
             continue
-        seen.add(phrase)
+        seen_pages.add(url)
+        snapshot = page_snapshots.get(url, {})
+        phrase = page_specific_keyword_phrase(suggested_phrase_from_url(url), url, snapshot)
+        if not phrase:
+            continue
+        matched_metrics = match_search_console_metrics(phrase, url, search_rows)
+        page_issues = keyword_relevant_issues(url, issues)
+        current_title = snapshot.get("title", "")
+        current_meta = snapshot.get("meta", "")
+        current_h1 = snapshot.get("h1", "")
+        decision = keyword_strategy_decision(phrase, url, snapshot, matched_metrics)
+        decision_label = keyword_decision_summary(phrase, url, snapshot, matched_metrics, page_issues)
+        confidence = keyword_decision_confidence(phrase, url, snapshot, matched_metrics, page_issues)
+        focus = keyword_focus_area(snapshot, page_issues, url)
+        content_brief = (
+            keyword_supporting_content_brief(phrase, url, matched_metrics)
+            if decision == "Create supporting content"
+            else {}
+        )
         rows.append(
             {
                 "page": url,
                 "suggested_keyword": phrase,
                 "intent": classify_keyword_intent(url, phrase.split()[0]),
-                "priority": page_keyword_priority(url, issues),
-                "action": "Check title, H1, meta description, intro copy and internal links for this phrase.",
+                "decision": decision,
+                "decision_label": decision_label,
+                "confidence": confidence,
+                "confidence_class": keyword_confidence_class(confidence),
+                "content_brief": content_brief,
+                "priority": page_keyword_priority(url, page_issues, matched_metrics, snapshot),
+                "action": keyword_action(phrase, url, snapshot, matched_metrics),
+                "focus": focus,
+                "why_now": keyword_why_now(phrase, url, matched_metrics, snapshot, page_issues),
+                "why_it_matters": keyword_why_it_matters(phrase, url, snapshot, matched_metrics, page_issues),
+                "matched_query": matched_metrics.get("query", ""),
+                "current_title": current_title,
+                "current_meta": current_meta,
+                "current_h1": current_h1,
+                "current_state": page_keyword_current_state(snapshot),
+                "related_issues": build_related_issue_refs(url, focus, page_issues),
             }
         )
         if len(rows) >= 8:
@@ -2798,13 +4972,61 @@ def suggested_phrase_from_url(url: str) -> str:
     return " ".join(tokens[:4])
 
 
-def page_keyword_priority(url: str, issues: list[dict[str, Any]]) -> str:
+def page_keyword_priority(
+    url: str,
+    issues: list[dict[str, Any]],
+    metrics: dict[str, str] | None = None,
+    snapshot: dict[str, str] | None = None,
+) -> str:
     issue_text = " ".join(str(issue.get("title") or "").lower() for issue in issues)
+    metrics = metrics or {}
+    snapshot = snapshot or {}
+    if safe_int(metrics.get("impressions")) >= 300 and safe_float(metrics.get("position")) >= 6:
+        return "Highest impact"
+    if not snapshot.get("title") or not snapshot.get("meta") or not snapshot.get("h1"):
+        return "Quick win"
     if any(term in issue_text for term in ["meta description", "document title", "heading"]):
         return "High"
     if any(term in urlparse(url).path.lower() for term in ["product", "collection", "category"]):
         return "Medium"
     return "Review"
+
+
+def page_keyword_current_state(snapshot: dict[str, str]) -> str:
+    missing = []
+    if not snapshot.get("title"):
+        missing.append("title")
+    if not snapshot.get("meta"):
+        missing.append("meta description")
+    if not snapshot.get("h1"):
+        missing.append("H1")
+    if missing:
+        return "Missing " + ", ".join(missing)
+    if safe_int(snapshot.get("word_count")) < 180:
+        return "Thin copy"
+    return "Has core SEO fields"
+
+
+def build_keyword_cannibalization(pages: list[dict[str, str]]) -> list[dict[str, Any]]:
+    grouped: dict[str, list[str]] = {}
+    for row in pages:
+        phrase = str(row.get("suggested_keyword") or "").strip().lower()
+        page = str(row.get("page") or "")
+        if not phrase or not page:
+            continue
+        grouped.setdefault(phrase, []).append(page)
+    warnings = []
+    for phrase, urls in grouped.items():
+        if len(urls) > 1:
+            warnings.append(
+                {
+                    "keyword": phrase,
+                    "pages": urls,
+                    "count": len(urls),
+                    "action": "Choose one primary landing page for this phrase and adjust titles, H1s, and internal links so the other pages support it instead of competing.",
+                }
+            )
+    return warnings[:6]
 
 
 def build_keyword_content_gaps(
@@ -2935,6 +5157,95 @@ def build_content_quality_summary(audits: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def build_content_governance_summary(pages: list[dict[str, Any]], issues: list[dict[str, Any]], website_key: str) -> dict[str, Any]:
+    content_issues = [issue for issue in issues if issue.get("source") == "content"]
+    open_issues = [issue for issue in content_issues if issue.get("status") not in {"resolved", "ignored"}]
+    affected_urls = {
+        str(evidence.get("page_url") or "")
+        for issue in open_issues
+        for evidence in issue.get("evidence", [])
+        if evidence.get("page_url")
+    }
+    rows = []
+    for issue in sorted(open_issues, key=lambda item: float(item.get("points") or 0), reverse=True):
+        evidence = next((entry for entry in issue.get("evidence", []) if entry.get("page_url")), {})
+        page_url = str(evidence.get("page_url") or "")
+        rows.append({
+            **issue,
+            "page_url": page_url,
+            "page_href": f"/pages/inspect?site={quote(website_key, safe='')}&url={quote(page_url, safe='')}" if page_url else "",
+            "example": evidence,
+        })
+    definitions = [
+        ("Titles", {"content-missing-title", "content-title-length", "content-duplicate-title"}),
+        ("Descriptions", {"content-missing-meta-description", "content-meta-length", "content-duplicate-meta-description"}),
+        ("Heading structure", {"content-missing-h1", "content-multiple-h1"}),
+        ("Content depth", {"content-thin-page"}),
+        ("Page language", {"content-missing-language"}),
+    ]
+    checks = []
+    for name, audit_ids in definitions:
+        matching = [issue for issue in open_issues if issue.get("audit_id") in audit_ids]
+        checks.append({"name": name, "count": len(matching), "status": "Needs attention" if matching else "Passed"})
+    deduction = sum(float(issue.get("points") or 0) * max(1, int(issue.get("affected_pages") or 1)) for issue in open_issues)
+    score = max(0, min(100, round(100 - deduction * 1.5))) if pages else 0
+    return {
+        "status": "Needs attention" if open_issues else "Passed" if pages else "Run needed",
+        "score": score,
+        "issue_count": len(open_issues),
+        "affected_pages": len(affected_urls),
+        "scanned_pages": len([page for page in pages if "html" in str(page.get("content_type") or "").lower()]),
+        "checks": checks,
+        "rows": rows,
+        "connector_note": "Built-in checks cover metadata, headings, language, duplicates, and thin content. LanguageTool or Vale can later add dictionary, tone, and editorial-policy rules.",
+    }
+
+
+def build_technical_crawl_summary(pages: list[dict[str, Any]], issues: list[dict[str, Any]]) -> dict[str, Any]:
+    html_pages = [page for page in pages if "html" in str(page.get("content_type") or "").lower()]
+    rows = []
+    schema_types: dict[str, int] = {}
+    totals = {
+        "pages": len(html_pages), "indexable": 0, "canonical": 0,
+        "structured": 0, "open_graph": 0, "hreflang": 0,
+        "hsts": 0, "csp": 0, "nosniff": 0, "referrer": 0,
+    }
+    for page in html_pages:
+        data = page.get("technical_data") if isinstance(page.get("technical_data"), dict) else {}
+        headers = data.get("security_headers") if isinstance(data.get("security_headers"), dict) else {}
+        open_graph = data.get("open_graph") if isinstance(data.get("open_graph"), dict) else {}
+        types = [str(value) for value in data.get("structured_data_types", []) if value]
+        indexable = bool(data.get("indexable", True))
+        totals["indexable"] += int(indexable)
+        totals["canonical"] += int(bool(data.get("canonical")))
+        totals["structured"] += int(bool(types))
+        totals["open_graph"] += int(bool(open_graph.get("title") and open_graph.get("description")))
+        totals["hreflang"] += int(bool(data.get("hreflang")))
+        totals["hsts"] += int(bool(headers.get("strict_transport_security")))
+        totals["csp"] += int(bool(headers.get("content_security_policy")))
+        totals["nosniff"] += int(bool(headers.get("x_content_type_options")))
+        totals["referrer"] += int(bool(headers.get("referrer_policy")))
+        for schema_type in types:
+            schema_types[schema_type] = schema_types.get(schema_type, 0) + 1
+        rows.append({
+            "url": page.get("url"), "title": page.get("title") or "Untitled page",
+            "indexable": indexable, "robots": data.get("robots") or "Default: index, follow",
+            "canonical": data.get("canonical") or "Missing", "canonical_ok": bool(data.get("canonical")) and int(data.get("canonical_count") or 0) == 1,
+            "schema_types": types, "invalid_json_ld": int(data.get("invalid_json_ld") or 0),
+            "open_graph_ok": bool(open_graph.get("title") and open_graph.get("description")),
+            "headers": headers,
+        })
+    technical_issues = [issue for issue in issues if issue.get("status") not in {"resolved", "ignored"} and issue.get("category") in {"Technical SEO", "Security"}]
+    denominator = max(1, len(html_pages))
+    coverage = {key: round(value / denominator * 100) for key, value in totals.items() if key != "pages"}
+    return {
+        "totals": totals, "coverage": coverage, "rows": rows,
+        "schema_types": [{"name": name, "pages": count} for name, count in sorted(schema_types.items(), key=lambda item: (-item[1], item[0]))],
+        "issues": technical_issues, "issue_count": len(technical_issues),
+        "status": "Needs attention" if technical_issues else "Healthy" if html_pages else "Run needed",
+    }
+
+
 def content_check(name: str, audit: Any, detail: str) -> dict[str, str]:
     audit = audit or {}
     score = audit.get("score")
@@ -2952,7 +5263,11 @@ def content_check(name: str, audit: Any, detail: str) -> dict[str, str]:
     }
 
 
-def build_link_integrity_summary(reports: list[dict[str, str]]) -> dict[str, Any]:
+def build_link_integrity_summary(
+    reports: list[dict[str, str]],
+    crawl_pages: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    crawl_pages = crawl_pages or []
     link_reports = [
         report for report in reports if "link" in report.get("name", "").lower()
     ]
@@ -2960,32 +5275,95 @@ def build_link_integrity_summary(reports: list[dict[str, str]]) -> dict[str, Any
     error_count = int(link_data.get("error_count") or 0) if link_data else 0
     warning_count = int(link_data.get("warning_count") or 0) if link_data else 0
     checked_count = int(link_data.get("checked_count") or 0) if link_data else 0
+    inventory_findings = crawl_link_findings(crawl_pages)
+    inventory_error_count = len(inventory_findings)
+    effective_error_count = error_count or inventory_error_count
+    effective_checked_count = checked_count or len(crawl_pages)
+    source_label = "LinkChecker report" if link_reports else "Crawl inventory" if crawl_pages else "Not checked yet"
+    status = (
+        "Needs fixes"
+        if effective_error_count
+        else "Report available"
+        if link_reports
+        else "Inventory available"
+        if crawl_pages
+        else "Run needed"
+    )
     return {
-        "status": "Needs fixes" if error_count else "Report available" if link_reports else "Run needed",
+        "status": status,
         "report_count": len(link_reports),
         "reports": link_reports[:6],
-        "error_count": str(error_count),
+        "error_count": str(effective_error_count),
         "warning_count": str(warning_count),
-        "checked_count": str(checked_count),
-        "sample_errors": (link_data or {}).get("sample_errors", []),
+        "checked_count": str(effective_checked_count),
+        "source_label": source_label,
+        "inventory_error_count": str(inventory_error_count),
+        "script_command": r"powershell -ExecutionPolicy Bypass -File .\scripts\run-linkcheck.ps1 -TargetUrl https://example.com",
+        "sample_errors": (link_data or {}).get("sample_errors", []) or [item["summary"] for item in inventory_findings[:8]],
+        "inventory_findings": inventory_findings[:12],
         "checks": [
             {
                 "name": "Broken links",
-                "status": "Needs fixes" if error_count else "Report available" if link_reports else "Run LinkChecker",
-                "detail": f"{error_count} error(s), {warning_count} warning(s), {checked_count} checked link(s).",
+                "status": "Needs fixes" if effective_error_count else "Passed" if effective_checked_count else "Run LinkChecker",
+                "detail": f"{effective_error_count} issue(s), {warning_count} warning(s), {effective_checked_count} checked page/link record(s).",
             },
             {
-                "name": "Redirect chains",
-                "status": "Planned",
-                "detail": "Use crawler output to detect slow or fragile redirect paths.",
+                "name": "Reachability source",
+                "status": source_label,
+                "detail": "LinkChecker provides full link-level crawling; crawl inventory provides page-level HTTP status coverage.",
             },
             {
-                "name": "Link ownership",
-                "status": "Planned",
-                "detail": "Group link fixes by page owner, template or content team.",
+                "name": "Fix ownership",
+                "status": "Ready" if effective_error_count else "Waiting for issues",
+                "detail": "Assign 404/500 pages to content owners, template owners, or redirect owners based on URL pattern.",
             },
         ],
     }
+
+
+def crawl_link_findings(crawl_pages: list[dict[str, Any]]) -> list[dict[str, str]]:
+    findings: list[dict[str, str]] = []
+    for page in crawl_pages:
+        url = str(page.get("url") or "")
+        status_text = str(page.get("status_code") or "").strip()
+        error = str(page.get("error") or "").strip()
+        status = safe_int(status_text)
+        if status < 400 and not error:
+            continue
+        if status >= 500:
+            severity = "High"
+            action = "Check hosting, application errors, and server logs; restore the page or redirect it."
+            fix_steps = [
+                "Open the URL and confirm whether the server error still happens.",
+                "Check hosting, application logs, or Shopify/app configuration for this route.",
+                "Restore the page if it should exist, or redirect it to the closest useful page.",
+            ]
+        elif status >= 400:
+            severity = "Medium"
+            action = "Restore the missing page, update internal links, or add a relevant 301 redirect."
+            fix_steps = [
+                "Open the URL to confirm whether the page is genuinely missing.",
+                "If the product/page was removed, create a 301 redirect to the closest live replacement.",
+                "Update internal links, menu links, sitemap entries, and campaign links that still point here.",
+            ]
+        else:
+            severity = "Medium"
+            action = "Investigate the crawler error, timeout, DNS, SSL, or blocking rule."
+            fix_steps = [
+                "Open the URL in a browser and check whether it loads consistently.",
+                "Check DNS, SSL, robots/firewall rules, and crawler blocking.",
+                "Run LinkChecker to confirm whether this is a temporary crawl issue or a real broken link.",
+            ]
+        findings.append({
+            "url": url,
+            "status": status_text or "Error",
+            "source": str(page.get("source") or "crawl"),
+            "severity": severity,
+            "action": action,
+            "fix_steps": fix_steps,
+            "summary": f"{status_text or 'Error'} {url} {error}".strip(),
+        })
+    return findings
 
 
 def load_latest_linkcheck_report(reports: list[dict[str, str]]) -> dict[str, Any] | None:
@@ -3113,15 +5491,39 @@ def build_connector_summary(reports: list[dict[str, str]]) -> list[dict[str, str
 
 
 def build_crawler_summary(
-    data: dict[str, Any], audits: dict[str, Any], reports: list[dict[str, str]]
+    data: dict[str, Any],
+    audits: dict[str, Any],
+    reports: list[dict[str, str]],
+    crawl_pages: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    crawl_pages = crawl_pages or []
     sitemap_reports = [
         report for report in reports if "sitemap" in report.get("name", "").lower()
     ]
+    sitemap_reports = enrich_sitemap_reports_for_site(sitemap_reports, data, crawl_pages)
     sitemap_data = load_latest_sitemap_report(sitemap_reports)
     sitemap_url_count = int(sitemap_data.get("url_count") or 0) if sitemap_data else 0
     sitemap_error_count = int(sitemap_data.get("error_count") or 0) if sitemap_data else 0
     sitemap_count = int(sitemap_data.get("sitemap_count") or 0) if sitemap_data else 0
+    crawl_sitemap_pages = [page for page in crawl_pages if str(page.get("source") or "") == "sitemap"]
+    discovered_count = sitemap_url_count or len(crawl_sitemap_pages) or len(crawl_pages)
+    sitemap_source_label = "XML sitemap report" if sitemap_data else "Crawl inventory" if crawl_pages else "Not discovered yet"
+    sitemap_files = [
+        {"url": str(url), "kind": sitemap_file_kind(str(url))}
+        for url in (sitemap_data or {}).get("sitemaps", [])[:8]
+    ]
+    page_samples = (sitemap_data or {}).get("urls", [])[:10]
+    if not page_samples and crawl_pages:
+        page_samples = [
+            {
+                "loc": page.get("url", ""),
+                "lastmod": "",
+                "changefreq": str(page.get("source") or ""),
+                "priority": "",
+            }
+            for page in crawl_pages[:10]
+        ]
+    sitemap_status = "Report available" if sitemap_data else "Inventory available" if crawl_pages else "Run needed"
     return {
         "robots": [
             content_check("Robots.txt", audits.get("robots-txt"), "Robots directives are reachable and valid."),
@@ -3137,19 +5539,79 @@ def build_crawler_summary(
             content_check("Crawlable anchors", audits.get("crawlable-anchors"), "Links can be followed by crawlers."),
         ],
         "sitemaps": {
-            "status": "Report available" if sitemap_reports else "Run needed",
+            "status": sitemap_status,
             "reports": sitemap_reports[:6],
             "final_url": data.get("finalDisplayedUrl") or data.get("finalUrl") or "",
-            "url_count": str(sitemap_url_count),
+            "url_count": str(discovered_count),
             "sitemap_count": str(sitemap_count),
             "error_count": str(sitemap_error_count),
-            "sample_pages": (sitemap_data or {}).get("urls", [])[:8],
+            "sample_pages": page_samples,
             "errors": (sitemap_data or {}).get("errors", [])[:5],
             "generated_at": format_date(str((sitemap_data or {}).get("generated_at", ""))),
             "source": (sitemap_data or {}).get("sitemap_entry", ""),
-            "next_step": "Use the sitemap pages as the crawl queue for Lighthouse, Pa11y, LinkChecker and content checks.",
+            "sitemap_files": sitemap_files,
+            "inventory_pages": str(len(crawl_pages)),
+            "sitemap_inventory_pages": str(len(crawl_sitemap_pages)),
+            "source_label": sitemap_source_label,
+            "script_command": r"powershell -ExecutionPolicy Bypass -File .\scripts\crawl-sitemaps.ps1",
+            "scan_href": "/scans",
+            "next_step": "Use discovered pages as the crawl queue for Lighthouse, Pa11y, LinkChecker and content checks.",
         },
     }
+
+
+def enrich_sitemap_reports_for_site(
+    reports: list[dict[str, str]],
+    data: dict[str, Any],
+    crawl_pages: list[dict[str, Any]],
+) -> list[dict[str, str]]:
+    existing = {report.get("name", "") for report in reports}
+    candidate_urls = [
+        str(data.get("finalDisplayedUrl") or ""),
+        str(data.get("finalUrl") or ""),
+        str(data.get("requestedUrl") or ""),
+    ]
+    candidate_urls.extend(str(page.get("url") or "") for page in crawl_pages[:5])
+    candidate_keys = {site_key(url) for url in candidate_urls if url}
+    if not candidate_keys or not REPORTS_DIR.exists():
+        return reports
+    enriched = list(reports)
+    for path in sorted(REPORTS_DIR.glob("sitemap-*.json"), key=lambda item: item.stat().st_mtime, reverse=True):
+        if path.name in existing:
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        report_key = str(data.get("site_key") or "")
+        report_site = str(data.get("site") or "")
+        if report_key not in candidate_keys and site_key(report_site) not in candidate_keys:
+            continue
+        stat = path.stat()
+        enriched.append({
+            "name": path.name,
+            "href": f"/reports/{path.name}",
+            "kind": detect_kind(path.name),
+            "size": format_size(stat.st_size),
+            "updated": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        })
+        existing.add(path.name)
+    return enriched
+
+
+def sitemap_file_kind(url: str) -> str:
+    lower = url.lower()
+    if "product" in lower:
+        return "Products"
+    if "collection" in lower or "category" in lower:
+        return "Collections"
+    if "blog" in lower or "article" in lower:
+        return "Blog"
+    if "page" in lower:
+        return "Pages"
+    if lower.endswith("/sitemap.xml"):
+        return "Index"
+    return "Sitemap"
 
 
 def load_latest_sitemap_report(reports: list[dict[str, str]]) -> dict[str, Any] | None:
@@ -3654,6 +6116,13 @@ def extract_affected_examples(details: dict[str, Any]) -> list[dict[str, str]]:
         for item in examples
         if item["selector"] != "Unknown element" or item["snippet"] or item["explanation"]
     ]
+
+
+def csv_cell(value: Any) -> Any:
+    """Prevent spreadsheet applications from evaluating exported user text."""
+    if not isinstance(value, str):
+        return value
+    return f"'{value}" if value.lstrip().startswith(("=", "+", "-", "@")) else value
 
 
 def compact_text(value: str, limit: int) -> str:
@@ -4755,6 +7224,8 @@ def score_label(value: Any) -> str:
 
 def detect_kind(name: str) -> str:
     lowered = name.lower()
+    if lowered.startswith("scan-manifest-") and lowered.endswith(".json"):
+        return "Scan sampling manifest"
     if lowered.startswith("sitemap-") and lowered.endswith(".json"):
         return "Sitemap crawl report"
     if "oobee" in lowered:

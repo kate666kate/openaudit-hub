@@ -20,14 +20,56 @@
         {% if error %}<div class="si-form-message error"><strong>Could not add website</strong><span>{{ error }}</span></div>{% endif %}
         {% if created %}<div class="si-form-message success"><strong>Website added</strong><span>It is ready for its first scan.</span></div>{% endif %}
 
+        <section class="si-wide-card si-admin-hub">
+          <div class="si-card-head">
+            <div><h2>Website registry</h2><span>This is where you add every company website and control whether it appears in the site switcher.</span></div>
+            <div class="si-card-actions">
+              <a class="si-button-secondary" href="/scans">Open scans</a>
+              <a href="/">Back to dashboard</a>
+            </div>
+          </div>
+          <div class="si-admin-grid">
+            <article class="si-admin-panel">
+              <span class="si-admin-kicker">Current setup</span>
+              <strong>{{ websites|length }} website(s)</strong>
+              <p>{{ websites|selectattr('active')|list|length }} active website(s) are available in the dashboard site switcher.</p>
+            </article>
+            <article class="si-admin-panel">
+              <span class="si-admin-kicker">What to do here</span>
+              <ol class="si-admin-list">
+                <li>Add each company website once using its main homepage URL.</li>
+                <li>Keep only websites you want to work on marked as active.</li>
+                <li>Set page limits and excluded paths before running broad scans.</li>
+              </ol>
+            </article>
+            <article class="si-admin-panel">
+              <span class="si-admin-kicker">After adding a website</span>
+              <p>Open its dashboard to confirm the site context, then queue a full scan so Lighthouse, accessibility, and content issues can populate.</p>
+              <a class="si-button-secondary" href="/scans">Run first scan</a>
+            </article>
+          </div>
+        </section>
+
         <section class="si-wide-card si-website-create">
           <div class="si-card-head"><div><h2>Add website</h2><span>Start with the canonical homepage URL</span></div></div>
+          <div class="si-inline-guidance">
+            <article><strong>Name</strong><span>Use the label you want to see in the site switcher, such as a brand or business unit name.</span></article>
+            <article><strong>Website URL</strong><span>Use the public homepage or canonical root URL, not a report link or deep page URL.</span></article>
+            <article><strong>Excluded paths</strong><span>Add admin, checkout, private, or duplicate sections you do not want the crawler to spend time on.</span></article>
+          </div>
           <form method="post" action="/websites" class="si-website-form">
             <label><span>Name</span><input name="name" placeholder="TruVision LED"></label>
             <label><span>Website URL</span><input name="base_url" type="url" placeholder="https://example.com.au/" required></label>
             <label><span>Scan schedule</span><select name="schedule"><option value="manual">Manual</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></label>
             <label><span>Maximum pages</span><input name="max_pages" type="number" min="1" max="10000" value="100"></label>
             <label class="wide"><span>Excluded paths</span><input name="exclude_paths" placeholder="/admin, /checkout, /private"></label>
+            <fieldset class="si-budget-fields wide"><legend>Quality budgets</legend>
+              <label><span>Performance minimum</span><input name="budget_performance" type="number" min="0" max="100" value="70"></label>
+              <label><span>Accessibility minimum</span><input name="budget_accessibility" type="number" min="0" max="100" value="80"></label>
+              <label><span>SEO minimum</span><input name="budget_seo" type="number" min="0" max="100" value="80"></label>
+              <label><span>LCP maximum (ms)</span><input name="budget_lcp_ms" type="number" min="500" max="30000" step="100" value="2500"></label>
+              <label><span>CLS maximum</span><input name="budget_cls" type="number" min="0" max="2" step="0.01" value="0.1"></label>
+            </fieldset>
             <button type="submit">Add website</button>
           </form>
         </section>
@@ -39,13 +81,28 @@
             <article>
               <div class="si-website-identity">
                 <span class="si-site-state {% if website.active %}active{% endif %}"></span>
-                <div><strong>{{ website.name }}</strong><a href="{{ website.base_url }}" target="_blank" rel="noreferrer">{{ website.base_url }}</a></div>
+                <div>
+                  <strong>{{ website.name }}</strong>
+                  <a href="{{ website.base_url }}" target="_blank" rel="noreferrer">{{ website.base_url }}</a>
+                  <div class="si-website-badges">
+                    <span class="si-status si-status-{{ 'active' if website.active else 'setup-needed' }}">{{ 'Active' if website.active else 'Inactive' }}</span>
+                    <span class="si-status si-status-starter-suggestions">{{ website.schedule|title }}</span>
+                    <span class="si-status si-status-report-available">{{ website.max_pages }} page limit</span>
+                  </div>
+                </div>
               </div>
               <form method="post" action="/websites/{{ website.key }}" class="si-website-edit">
                 <label><span>Name</span><input name="name" value="{{ website.name }}"></label>
                 <label><span>Schedule</span><select name="schedule">{% for option in ['manual', 'daily', 'weekly', 'monthly'] %}<option value="{{ option }}" {% if website.schedule == option %}selected{% endif %}>{{ option|title }}</option>{% endfor %}</select></label>
                 <label><span>Max pages</span><input name="max_pages" type="number" min="1" max="10000" value="{{ website.max_pages }}"></label>
                 <label><span>Excluded paths</span><input name="exclude_paths" value="{{ website.exclude_paths }}"></label>
+                <fieldset class="si-budget-fields wide"><legend>Quality budgets</legend>
+                  <label><span>Performance</span><input name="budget_performance" type="number" min="0" max="100" value="{{ website.budget_performance }}"></label>
+                  <label><span>Accessibility</span><input name="budget_accessibility" type="number" min="0" max="100" value="{{ website.budget_accessibility }}"></label>
+                  <label><span>SEO</span><input name="budget_seo" type="number" min="0" max="100" value="{{ website.budget_seo }}"></label>
+                  <label><span>LCP (ms)</span><input name="budget_lcp_ms" type="number" min="500" max="30000" step="100" value="{{ website.budget_lcp_ms }}"></label>
+                  <label><span>CLS</span><input name="budget_cls" type="number" min="0" max="2" step="0.01" value="{{ website.budget_cls }}"></label>
+                </fieldset>
                 <label class="si-check"><input name="active" type="checkbox" {% if website.active %}checked{% endif %}><span>Active</span></label>
                 <div class="si-form-actions">
                   <a href="/?site={{ website.key }}">Open dashboard</a>

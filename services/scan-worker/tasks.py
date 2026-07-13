@@ -6,11 +6,16 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from celery import Celery
 
+from content_quality import extract_content_issues, write_content_report
 from crawler import crawl_site
 from database import create_scan_job, get_scan_job, get_website, reconcile_issues, replace_crawl_pages, update_scan_job, websites_due_for_scan
+from visual_evidence import attach_visual_evidence
+from sampling import select_lighthouse_candidates
+from budgets import evaluate_lighthouse_budgets
 
 
 BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://redis:6379/0")
@@ -54,7 +59,8 @@ def run_lighthouse(self: Any, job_id: str) -> dict[str, Any]:
     scan_type = str(job.get("scan_type") or "full").lower()
     include_lighthouse = scan_type in {"lighthouse", "full", "scheduled"}
     include_pa11y = scan_type in {"accessibility", "full", "scheduled"}
-    if not include_lighthouse and not include_pa11y:
+    include_content = scan_type in {"content", "full", "scheduled"}
+    if not include_lighthouse and not include_pa11y and not include_content:
         include_lighthouse = True
     update_scan_job(job_id, status="running", progress=5, message="Discovering sitemap and internal pages.", started_at=now(), task_id=self.request.id or "")
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -64,7 +70,9 @@ def run_lighthouse(self: Any, job_id: str) -> dict[str, Any]:
         candidates = [page for page in pages if page.get("status_code", 0) < 400 and "html" in str(page.get("content_type") or "").lower()]
         candidates.sort(key=lambda page: (int(page.get("depth") or 0), 0 if page.get("source") == "homepage" else 1, str(page.get("url") or "")))
         candidates = candidates or [{"url": website["base_url"], "depth": 0, "source": "homepage"}]
-        lighthouse_candidates = candidates[:max(1, int(os.getenv("LIGHTHOUSE_PAGE_LIMIT", "3")))]
+        lighthouse_candidates = select_lighthouse_candidates(
+            candidates, max(1, int(os.getenv("LIGHTHOUSE_PAGE_LIMIT", "10")))
+        )
         pa11y_candidates = candidates[:max(1, int(os.getenv("PA11Y_PAGE_LIMIT", "20")))]
         update_scan_job(job_id, progress=20, message=f"Discovered {len(pages)} page(s). Starting audit tools.")
 
@@ -72,20 +80,33 @@ def run_lighthouse(self: Any, job_id: str) -> dict[str, Any]:
         report_paths: list[Path] = []
         tool_errors: list[str] = []
         scanned_sources: set[str] = set()
+        if include_content:
+            scanned_sources.add("content")
+            content_issues = extract_content_issues(pages)
+            all_issues.extend(content_issues)
+            report_paths.append(write_content_report(REPORTS_DIR, str(website["key"]), pages, content_issues))
         if include_lighthouse:
             scanned_sources.add("lighthouse")
-            for index, page in enumerate(lighthouse_candidates, start=1):
-                progress = 20 + round((index / len(lighthouse_candidates)) * (35 if include_pa11y else 60))
-                update_scan_job(job_id, progress=progress, message=f"Lighthouse {index}/{len(lighthouse_candidates)}: {page['url']}")
-                try:
-                    json_path = run_lighthouse_page(str(website["key"]), str(page["url"]), index)
-                except Exception as exc:
-                    tool_errors.append(f"Lighthouse {page['url']}: {exc}")
-                    continue
-                report_paths.append(json_path)
-                if json_path.exists():
-                    data = json.loads(json_path.read_text(encoding="utf-8"))
-                    all_issues.extend(extract_issues(data.get("categories", {}), data.get("audits", {}), str(page["url"])))
+            scanned_sources.add("budget")
+            concurrency = max(1, min(4, int(os.getenv("LIGHTHOUSE_CONCURRENCY", "2"))))
+            with ThreadPoolExecutor(max_workers=min(concurrency, len(lighthouse_candidates))) as executor:
+                futures = {
+                    executor.submit(audit_lighthouse_candidate, str(website["key"]), page, index, website): (index, page)
+                    for index, page in enumerate(lighthouse_candidates, start=1)
+                }
+                completed = 0
+                for future in as_completed(futures):
+                    index, page = futures[future]
+                    completed += 1
+                    progress = 20 + round((completed / len(lighthouse_candidates)) * (35 if include_pa11y else 60))
+                    update_scan_job(job_id, progress=progress, message=f"Lighthouse {completed}/{len(lighthouse_candidates)} complete: {page['url']}")
+                    try:
+                        json_path, page_issues = future.result()
+                    except Exception as exc:
+                        tool_errors.append(f"Lighthouse {page['url']}: {exc}")
+                        continue
+                    report_paths.append(json_path)
+                    all_issues.extend(page_issues)
         if include_pa11y:
             scanned_sources.add("pa11y")
             start_progress = 55 if include_lighthouse else 20
@@ -99,9 +120,14 @@ def run_lighthouse(self: Any, job_id: str) -> dict[str, Any]:
                     tool_errors.append(f"Pa11y {page['url']}: {exc}")
                     continue
                 report_paths.append(pa11y_path)
+                attach_visual_evidence(REPORTS_DIR, str(website["key"]), str(page["url"]), f"pa11y-{index}", pa11y_issues)
                 all_issues.extend(pa11y_issues)
         if not report_paths:
             raise RuntimeError("No audit page completed successfully. " + " | ".join(tool_errors[:3]))
+        report_paths.append(write_scan_manifest(
+            str(website["key"]), pages, lighthouse_candidates if include_lighthouse else [],
+            pa11y_candidates if include_pa11y else [],
+        ))
     except Exception as exc:
         update_scan_job(job_id, status="failed", progress=100, message=str(exc), finished_at=now())
         raise
@@ -131,6 +157,36 @@ def run_lighthouse_page(website_key: str, url: str, index: int) -> Path:
         raise RuntimeError((result.stderr or result.stdout or "Lighthouse failed.")[-3000:])
     json_path = Path(f"{base_path}.json")
     return json_path if json_path.exists() else Path(f"{base_path}.report.json")
+
+
+def audit_lighthouse_candidate(website_key: str, page: dict[str, Any], index: int,
+                               website: dict[str, Any]) -> tuple[Path, list[dict[str, Any]]]:
+    url = str(page["url"])
+    json_path = run_lighthouse_page(website_key, url, index)
+    issues: list[dict[str, Any]] = []
+    if json_path.exists():
+        data = json.loads(json_path.read_text(encoding="utf-8"))
+        issues = extract_issues(data.get("categories", {}), data.get("audits", {}), url)
+        issues.extend(evaluate_lighthouse_budgets(data, url, website))
+        attach_visual_evidence(REPORTS_DIR, website_key, url, f"lighthouse-{index}", issues)
+    return json_path, issues
+
+
+def write_scan_manifest(website_key: str, pages: list[dict[str, Any]], lighthouse_pages: list[dict[str, Any]], pa11y_pages: list[dict[str, Any]]) -> Path:
+    stamp = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace(":", "-").replace(".", "-")
+    path = REPORTS_DIR / f"scan-manifest-{website_key}-{stamp}.json"
+    payload = {
+        "website_key": website_key,
+        "generated_at": now().isoformat(),
+        "discovered_pages": len(pages),
+        "lighthouse": [
+            {"url": str(page.get("url") or ""), "route_group": str(page.get("sample_group") or "")}
+            for page in lighthouse_pages
+        ],
+        "pa11y": [str(page.get("url") or "") for page in pa11y_pages],
+    }
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return path
 
 
 def run_pa11y_page(website_key: str, url: str, index: int) -> tuple[Path, list[dict[str, Any]]]:

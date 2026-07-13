@@ -10,9 +10,8 @@
     <header class="si-topbar">
       <strong>OpenAudit</strong>
       <nav aria-label="Account links">
-        <a href="#">Help Center</a>
-        <a href="#">Settings</a>
-        <a href="#">OpenAudit User</a>
+        <a href="/modules/feature-coverage{% if selected_site_key %}?site={{ selected_site_key }}{% endif %}">Help</a>
+        <a href="/websites">Settings</a>
       </nav>
     </header>
 
@@ -30,12 +29,12 @@
             </select>
           </form>
           <div class="si-select">
-            <span>Group</span>
-            <strong>No group selected</strong>
+            <span>Scope</span>
+            <strong>Entire website</strong>
           </div>
           <div class="si-select">
-            <span>Period</span>
-            <strong>This month</strong>
+            <span>Data</span>
+            <strong>Latest completed scan</strong>
           </div>
           <div class="si-page-search" data-site="{{ selected_site_key }}">
             <input type="search" placeholder="Search crawled pages" aria-label="Search crawled pages" aria-controls="si-page-search-results" autocomplete="off" {% if not selected_site_key %}disabled{% endif %}>
@@ -54,6 +53,71 @@
             {% endif %}
           </div>
         </div>
+
+        <section class="si-wide-card si-ops-card">
+          <div class="si-card-head">
+            <div>
+              <h2>Operations center</h2>
+              <span>Keep website setup, scanning, and the latest audit context in one place</span>
+            </div>
+            <div class="si-card-actions">
+              <a class="si-button-secondary" href="/websites">Manage websites</a>
+              <a href="/scans">Open scans</a>
+            </div>
+          </div>
+          <div class="si-ops-grid">
+            <article class="si-ops-panel">
+              <span class="si-ops-kicker">Current website</span>
+              <strong>{{ operations_snapshot.selected_label }}</strong>
+              <p>{{ operations_snapshot.selected_url or "No website selected yet." }}</p>
+              <div class="si-ops-metrics">
+                <div><b>{{ operations_snapshot.page_count }}</b><span>crawled pages</span></div>
+                <div><b>{{ operations_snapshot.open_issue_count }}</b><span>open issues</span></div>
+                <div><b>{{ operations_snapshot.latest_score }}</b><span>latest DCI score</span></div>
+              </div>
+              {% if not operations_snapshot.report_matches_selected and operations_snapshot.report_site %}
+              <div class="si-ops-warning">
+                <strong>Report context check</strong>
+                <p>The latest Lighthouse report belongs to {{ operations_snapshot.report_site }}. Run a fresh scan if you want this dashboard to reflect {{ operations_snapshot.selected_label }}.</p>
+              </div>
+              {% endif %}
+            </article>
+
+            <article class="si-ops-panel">
+              <span class="si-ops-kicker">Scan queue</span>
+              <strong>{{ operations_snapshot.latest_scan_status|title }}</strong>
+              <p>{{ operations_snapshot.latest_scan_message }}</p>
+              <div class="si-ops-progress">
+                <div class="score-bar"><i class="bar-good" style="width: {{ operations_snapshot.latest_scan_progress }}%"></i></div>
+                <span>{{ operations_snapshot.latest_scan_progress }}% &middot; {{ operations_snapshot.latest_scan_type|title }}</span>
+              </div>
+              <div class="si-ops-actions">
+                <a class="si-button-secondary" href="/scans">Start or monitor scans</a>
+                {% if operations_snapshot.latest_scan_started %}
+                <small>Latest job started: {{ operations_snapshot.latest_scan_started }}</small>
+                {% else %}
+                <small>No scan has been queued yet for this website.</small>
+                {% endif %}
+              </div>
+            </article>
+
+            <article class="si-ops-panel">
+              <span class="si-ops-kicker">Website registry</span>
+              <strong>{{ website_count }} website(s)</strong>
+              <p>{{ active_website_count }} active website(s) are available in the site switcher.</p>
+              <ol class="si-ops-list">
+                <li>Add each company website once in the Websites page.</li>
+                <li>Use the site switcher at the top of each module to move between websites.</li>
+                <li>Run a scan after edits so the issue list and scorecards refresh.</li>
+              </ol>
+              <a class="si-button-secondary" href="/websites">Open website list</a>
+            </article>
+          </div>
+          <div class="si-ops-next">
+            <span>Recommended next step</span>
+            <strong>{{ operations_snapshot.next_action }}</strong>
+          </div>
+        </section>
 
         {% if lighthouse.ok %}
         <section class="si-score-grid compact-dashboard" aria-label="Dashboard scores">
@@ -279,25 +343,6 @@
           </div>
         </section>
 
-        <section class="si-wide-card">
-          <div class="si-card-head">
-            <h2>Recent reports</h2>
-            <a href="/modules/reports{% if selected_site_key %}?site={{ selected_site_key }}{% endif %}">Open reports</a>
-          </div>
-          <div class="si-report-grid compact">
-            {% if reports %}
-            {% for report in reports[:3] %}
-            <a href="{{ report.href }}" target="_blank" rel="noreferrer">
-              <strong>{{ report.kind }}</strong>
-              <span>{{ report.name }}</span>
-              <small>{{ report.updated }}</small>
-            </a>
-            {% endfor %}
-            {% else %}
-            <p class="si-empty">No generated reports yet.</p>
-            {% endif %}
-          </div>
-        </section>
         {% else %}
         <section class="si-wide-card">
           <h2>No Lighthouse report yet</h2>

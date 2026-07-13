@@ -4,136 +4,344 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>OpenAudit Hub Demo</title>
-  <meta name="description" content="OpenAudit Hub static interview demo for website governance, accessibility, SEO, content quality, and analytics.">
+  <meta name="description" content="Static interview demo for OpenAudit Hub, a self-hosted website governance platform.">
   <style>
     :root {
       --blue: #2363f6;
-      --blue-dark: #061331;
-      --nav: #080922;
-      --panel: #ffffff;
+      --nav: #070923;
+      --ink: #121826;
+      --muted: #5d6b82;
       --line: #d8e0ea;
-      --bg: #eef2f6;
-      --text: #101828;
-      --muted: #52627a;
-      --green: #54b948;
-      --yellow: #f2c94c;
-      --red: #ea4c73;
-      --cyan: #16bfd2;
-      --shadow: 0 16px 34px rgba(16, 24, 40, .12);
-      font-family: "Aptos", "Segoe UI", sans-serif;
+      --soft: #f5f8fc;
+      --green: #51b85b;
+      --yellow: #f3cf31;
+      --orange: #f2994a;
+      --red: #e84f77;
+      --cyan: #15bfd0;
+      --shadow: 0 14px 32px rgba(16, 24, 40, .12);
+      font-family: "Segoe UI", Aptos, sans-serif;
     }
 
     * { box-sizing: border-box; }
-    body { margin: 0; color: var(--text); background: linear-gradient(135deg, #f7f9fc 0%, #e7edf5 100%); }
+    body { margin: 0; color: var(--ink); background: linear-gradient(135deg, #f8fbff, #e7edf5); }
     button, select, input { font: inherit; }
-    .shell { min-height: 100vh; display: grid; grid-template-columns: 280px 1fr; }
-    .topbar { display: none; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; color: #fff; background: var(--blue); position: sticky; top: 0; z-index: 20; }
-    .brand { font-weight: 800; letter-spacing: -.03em; font-size: 1.2rem; }
-    .sidebar { background: var(--nav); color: #f8fbff; min-height: 100vh; padding: 18px 14px; position: sticky; top: 0; align-self: start; }
-    .sidebar .brand { color: #fff; margin: 4px 10px 22px; }
-    .search { width: 100%; border: 1px solid #39425f; border-radius: 8px; background: #11162f; color: #fff; padding: 12px; margin-bottom: 22px; }
-    .nav-section { color: #9fa8bd; font-size: .72rem; font-weight: 800; text-transform: uppercase; letter-spacing: .12em; padding: 16px 12px 8px; }
-    .nav-item { width: 100%; display: flex; align-items: center; justify-content: space-between; border: 0; border-left: 4px solid transparent; border-radius: 4px; color: #f7f9ff; background: transparent; padding: 13px 12px; cursor: pointer; text-align: left; }
-    .nav-item.active { background: #34364c; border-left-color: #76d7ff; }
-    .nav-item span { color: #aeb8cc; font-size: .82rem; }
-    main { min-width: 0; }
-    .header { background: var(--blue); color: #fff; min-height: 58px; display: flex; align-items: center; justify-content: space-between; padding: 0 28px; box-shadow: 0 2px 12px rgba(0, 0, 0, .12); }
-    .header-actions { display: flex; gap: 10px; align-items: center; font-size: .92rem; }
-    .page { padding: 22px 28px 44px; max-width: 1500px; }
-    .filters { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 28px; }
-    .select, .pill-button { border: 1px solid #cfd8e6; background: #fff; color: #14213d; border-radius: 3px; padding: 12px 14px; min-height: 46px; box-shadow: 0 1px 3px rgba(16, 24, 40, .06); }
-    .pill-button { cursor: pointer; font-weight: 700; }
-    h1 { font-size: clamp(2rem, 4vw, 3.4rem); letter-spacing: -.06em; margin: 0 0 24px; font-weight: 500; }
-    h2 { margin: 0; font-size: 1.35rem; letter-spacing: -.02em; }
+    button { cursor: pointer; }
+    .mobile { display: none; position: sticky; top: 0; z-index: 20; align-items: center; justify-content: space-between; padding: 12px 16px; color: #fff; background: var(--blue); }
+    .menu { border: 0; border-radius: 8px; background: rgba(255,255,255,.18); color: #fff; padding: 8px 10px; font-weight: 800; }
+    .app { display: grid; grid-template-columns: 286px 1fr; min-height: 100vh; }
+    .side { position: sticky; top: 0; height: 100vh; padding: 20px 14px; background: var(--nav); color: #fff; overflow-y: auto; }
+    .brand { font-size: 1.3rem; font-weight: 850; letter-spacing: -.03em; }
+    .side .brand { margin: 4px 10px 24px; }
+    .search { width: 100%; padding: 12px; border: 1px solid #38415e; border-radius: 8px; color: #fff; background: #11162f; }
+    .section { padding: 18px 12px 8px; color: #aab4ca; font-size: .72rem; font-weight: 850; text-transform: uppercase; letter-spacing: .12em; }
+    .nav { display: flex; justify-content: space-between; gap: 8px; width: 100%; padding: 13px 12px; border: 0; border-left: 4px solid transparent; border-radius: 4px; text-align: left; color: #fff; background: transparent; }
+    .nav span { color: #aab4ca; }
+    .nav.active { background: #36374f; border-left-color: #76d7ff; }
+    .top { height: 58px; display: flex; align-items: center; justify-content: space-between; padding: 0 28px; color: #fff; background: var(--blue); }
+    .page { max-width: 1540px; padding: 24px 28px 52px; }
+    .filters { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 20px; }
+    .control { min-height: 46px; padding: 12px 14px; border: 1px solid #cfd8e6; border-radius: 4px; color: #14213d; background: #fff; box-shadow: 0 1px 3px rgba(16,24,40,.07); }
+    h1 { margin: 0 0 22px; font-size: clamp(2rem, 4vw, 3.35rem); font-weight: 500; letter-spacing: -.06em; }
+    h2 { margin: 0; font-size: 1.34rem; letter-spacing: -.02em; }
+    h3 { margin: 0 0 8px; }
+    p { line-height: 1.5; }
     .grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 18px; }
-    .card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 2px 12px rgba(16, 24, 40, .07); overflow: hidden; }
-    .card-header { border-bottom: 1px solid #edf1f5; padding: 18px 20px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-    .card-body { padding: 20px; }
-    .score-card { grid-column: span 3; min-height: 310px; }
-    .chart-card { grid-column: span 4; }
-    .wide-card { grid-column: span 6; }
-    .full-card { grid-column: span 12; }
-    .score-ring { --score: 78; width: 178px; height: 178px; margin: 8px auto 22px; border-radius: 50%; display: grid; place-items: center; background: radial-gradient(circle at center, white 58%, transparent 59%), conic-gradient(var(--ring) calc(var(--score) * 1%), #eef1f4 0); }
-    .score-ring strong { font-size: 2.9rem; letter-spacing: -.05em; }
-    .score-ring small { color: var(--muted); font-weight: 700; }
-    .fix-text { text-align: center; color: var(--muted); line-height: 1.5; min-height: 48px; }
-    .link { color: #0b68d8; font-weight: 750; cursor: pointer; }
-    .primary { display: inline-flex; justify-content: center; border: 1px solid #bec8d7; background: #fff; color: #0b1934; padding: 10px 18px; border-radius: 999px; font-weight: 800; cursor: pointer; }
-    .metric-row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 14px; margin: 12px 0; }
+    .card { overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: #fff; box-shadow: 0 3px 14px rgba(16,24,40,.08); }
+    .head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 20px; border-bottom: 1px solid #edf1f5; }
+    .body { padding: 20px; }
+    .score { grid-column: span 3; min-height: 310px; }
+    .wide { grid-column: span 6; }
+    .full { grid-column: span 12; }
+    .third { grid-column: span 4; }
+    .ring { --score: 80; width: 176px; height: 176px; margin: 8px auto 20px; border-radius: 50%; display: grid; place-items: center; background: radial-gradient(circle, #fff 58%, transparent 59%), conic-gradient(var(--color) calc(var(--score) * 1%), #edf1f4 0); }
+    .ring strong { font-size: 2.8rem; letter-spacing: -.06em; }
+    .ring small { color: var(--muted); font-weight: 750; }
+    .center { text-align: center; color: var(--muted); }
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid #bec8d7; border-radius: 999px; padding: 10px 18px; font-weight: 850; color: #0b1934; background: #fff; }
+    .btn.primary { color: #fff; border-color: var(--blue); background: var(--blue); }
+    .link { color: #0b68d8; font-weight: 850; cursor: pointer; }
+    .muted { color: var(--muted); }
+    .badge { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 4px 9px; color: #174ea6; background: #eef4ff; font-size: .78rem; font-weight: 850; }
+    .badge.warn { color: #93370d; background: #fff1dc; }
+    .badge.good { color: #067647; background: #dcfae6; }
+    .banner { grid-column: span 12; display: grid; grid-template-columns: 1.3fr .7fr; gap: 18px; padding: 22px; border: 1px solid #bdd6ff; border-radius: 10px; background: linear-gradient(100deg, #fff, #eef6ff); box-shadow: var(--shadow); }
+    .banner strong { display: block; font-size: 1.55rem; letter-spacing: -.03em; }
+    .banner .mini { display: grid; gap: 10px; }
+    .mini div { padding: 12px; border: 1px solid #dbe6f4; border-radius: 8px; background: #fff; }
+    .row { display: grid; grid-template-columns: 1fr auto; gap: 14px; align-items: center; margin: 13px 0; }
     .bar { height: 8px; border-radius: 99px; background: #e8edf3; overflow: hidden; }
-    .bar span { display: block; height: 100%; width: var(--value); background: var(--color); border-radius: inherit; }
-    .sparkline { width: 100%; height: 160px; }
-    .status-list { display: grid; gap: 12px; }
-    .status-row { display: grid; grid-template-columns: 14px 1fr auto; gap: 12px; align-items: center; padding: 12px 0; border-bottom: 1px solid #edf1f5; }
+    .bar span { display: block; height: 100%; width: var(--v); background: var(--c); }
+    .spark { width: 100%; height: 164px; }
+    .status { display: grid; grid-template-columns: 14px 1fr auto; gap: 12px; align-items: center; padding: 12px 0; border-bottom: 1px solid #edf1f5; }
     .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--green); }
     .dot.warn { background: #be7d1c; }
-    .table-wrap { overflow-x: auto; }
-    table { width: 100%; border-collapse: collapse; min-width: 760px; }
-    th, td { text-align: left; padding: 14px 16px; border-bottom: 1px solid #edf1f5; vertical-align: middle; }
-    th { font-size: .78rem; text-transform: uppercase; letter-spacing: .08em; color: #52627a; background: #f7f9fc; }
-    .badge { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 4px 9px; background: #eef4ff; color: #174ea6; font-weight: 800; font-size: .78rem; }
-    .issue { display: none; }
-    .issue.active { display: block; }
-    .hero-issue { display: grid; grid-template-columns: 1fr 220px; gap: 20px; align-items: center; padding: 24px; background: linear-gradient(90deg, #fff, #f2f7fc); border: 1px solid var(--line); border-radius: 8px; margin-bottom: 18px; }
-    .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
-    .step { border: 1px solid var(--line); border-radius: 8px; padding: 16px; background: #fff; }
-    .step strong { display: block; margin-bottom: 8px; }
-    .scan-panel { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; align-items: center; }
-    .progress { height: 12px; border-radius: 999px; background: #e8edf3; overflow: hidden; margin: 18px 0; }
-    .progress span { display: block; width: 0; height: 100%; background: linear-gradient(90deg, var(--blue), var(--cyan)); transition: width .6s ease; }
+    .table { overflow-x: auto; }
+    table { width: 100%; min-width: 760px; border-collapse: collapse; }
+    th, td { padding: 14px 16px; border-bottom: 1px solid #edf1f5; text-align: left; vertical-align: top; }
+    th { color: #52627a; background: #f7f9fc; font-size: .78rem; text-transform: uppercase; letter-spacing: .08em; }
     .screen { display: none; }
     .screen.active { display: block; }
-    .muted { color: var(--muted); }
-    .mobile-menu { border: 0; background: rgba(255, 255, 255, .16); color: #fff; padding: 8px 10px; border-radius: 8px; font-weight: 800; }
-    @media (max-width: 1100px) { .score-card { grid-column: span 6; } .chart-card, .wide-card { grid-column: span 12; } }
-    @media (max-width: 780px) { .shell { display: block; } .topbar { display: flex; } .header { display: none; } .sidebar { position: fixed; inset: 0 auto 0 0; width: min(84vw, 320px); transform: translateX(-105%); transition: transform .22s ease; z-index: 40; box-shadow: var(--shadow); } .sidebar.open { transform: translateX(0); } .page { padding: 18px 14px 32px; } .filters { display: grid; } .select, .pill-button { width: 100%; } .score-card, .chart-card, .wide-card, .full-card { grid-column: span 12; } .hero-issue, .scan-panel, .steps { grid-template-columns: 1fr; } }
+    .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+    .step { padding: 16px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+    .issuehero { display: grid; grid-template-columns: 1fr 220px; gap: 20px; align-items: center; margin-bottom: 18px; padding: 24px; border: 1px solid var(--line); border-radius: 8px; background: linear-gradient(90deg,#fff,#f2f7fc); }
+    .progress { height: 12px; margin: 18px 0; border-radius: 99px; background: #e8edf3; overflow: hidden; }
+    .progress span { display: block; width: 0; height: 100%; background: linear-gradient(90deg,var(--blue),var(--cyan)); transition: .6s; }
+    .split { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+    .site-meta { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+    .metric { padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: #fbfdff; }
+    .metric strong { display: block; font-size: 1.8rem; letter-spacing: -.05em; }
+    .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+    .compare .panel { padding: 18px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+    .compare ul { margin: 12px 0 0; padding-left: 18px; color: var(--muted); }
+    .callout { padding: 16px 18px; border: 1px solid #cfe0ff; border-radius: 10px; background: linear-gradient(90deg, #f8fbff, #eef5ff); }
+    .stack { display: grid; gap: 18px; }
+    .timeline { display: grid; gap: 12px; }
+    .timeline article { padding-left: 16px; border-left: 4px solid #c7d7ff; }
+    .kbd { padding: 2px 6px; border: 1px solid #ccd6e3; border-radius: 5px; background: #f8fafc; font-size: .85em; }
+    @media (max-width: 1120px) { .score { grid-column: span 6; } .wide, .third, .banner { grid-column: span 12; } .banner, .compare { grid-template-columns: 1fr; } }
+    @media (max-width: 780px) { .app { display: block; } .mobile { display: flex; } .top { display: none; } .side { position: fixed; inset: 0 auto 0 0; width: min(84vw, 320px); transform: translateX(-105%); transition: .22s; z-index: 30; box-shadow: var(--shadow); } .side.open { transform: translateX(0); } .page { padding: 18px 14px 34px; } .filters { display: grid; } .filters > * { width: 100%; } .score, .wide, .full, .third { grid-column: span 12; } .steps, .split, .issuehero, .compare { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
-  <div class="topbar"><button class="mobile-menu" id="menuButton">Menu</button><div class="brand">OpenAudit Hub</div><span>Demo</span></div>
-  <div class="shell">
-    <aside class="sidebar" id="sidebar">
-      <div class="brand">OpenAudit Hub</div><input class="search" id="menuSearch" placeholder="Search in menu">
-      <div class="nav-section">Main</div>
-      <button class="nav-item active" data-screen="dashboard">Dashboard <span>Overview</span></button><button class="nav-item" data-screen="accessibility">Accessibility <span>WCAG</span></button><button class="nav-item" data-screen="seo">SEO <span>Keywords</span></button><button class="nav-item" data-screen="content">Content Quality <span>Pages</span></button><button class="nav-item" data-screen="analytics">Analytics <span>Demo</span></button>
-      <div class="nav-section">Actions</div><button class="nav-item" data-screen="scan">Run demo scan <span>Safe</span></button><button class="nav-item" data-screen="architecture">Architecture <span>Docker</span></button>
+  <div class="mobile"><button class="menu" id="menu">Menu</button><strong>OpenAudit Hub</strong><span>Demo</span></div>
+  <div class="app">
+    <aside class="side" id="side">
+      <div class="brand">OpenAudit Hub</div>
+      <input class="search" id="search" placeholder="Search in menu">
+      <div class="section">Main</div>
+      <button class="nav active" data-go="dashboard">Dashboard <span>Overview</span></button>
+      <button class="nav" data-go="summary">Executive summary <span>Story</span></button>
+      <button class="nav" data-go="accessibility">Accessibility <span>WCAG</span></button>
+      <button class="nav" data-go="seo">SEO <span>Keywords</span></button>
+      <button class="nav" data-go="content">Content Quality <span>Pages</span></button>
+      <button class="nav" data-go="analytics">Analytics <span>Demo</span></button>
+      <div class="section">Workflow</div>
+      <button class="nav" data-go="scan">Run demo scan <span>Safe</span></button>
+      <button class="nav" data-go="improvements">Before / after <span>Impact</span></button>
+      <button class="nav" data-go="plan">Activity plan <span>Tasks</span></button>
+      <button class="nav" data-go="inspector">Page inspector <span>Evidence</span></button>
+      <button class="nav" data-go="architecture">Architecture <span>Docker</span></button>
     </aside>
-    <main><div class="header"><div class="brand">OpenAudit Hub</div><div class="header-actions"><span>Help Center</span><span>Settings</span><strong>Interview Demo</strong></div></div>
+
+    <main>
+      <div class="top"><div class="brand">OpenAudit Hub</div><div>Interview Demo &nbsp; Help Center &nbsp; Settings</div></div>
       <section class="page">
-        <div class="filters"><select class="select" id="siteSelect" aria-label="Select website"><option value="truvision">TruVision LED - https://truvisionled.com.au</option><option value="piranha">Piranha Off Road - https://www.piranhaoffroad.com.au</option><option value="struts">Struts Australia - https://strutsaustralia.com.au</option></select><select class="select" aria-label="Date range"><option>This month</option><option>Last 30 days</option><option>Last audit</option></select><button class="pill-button" id="demoScanButton">Run demo scan</button></div>
-        <div class="screen active" id="dashboard"><h1>Dashboard</h1><div class="grid">
-          <article class="card score-card"><div class="card-header"><h2>Digital Certainty Index</h2></div><div class="card-body"><div class="score-ring" style="--score: 78; --ring: var(--yellow);"><div><strong data-score="dci">78</strong><small>/100</small></div></div><p class="fix-text">Fix <span class="link" data-screen-link="issue">Largest Contentful Paint</span> to gain up to 43.1 points.</p><button class="primary" data-screen-link="scan">Run demo scan</button></div></article>
-          <article class="card score-card"><div class="card-header"><h2>Accessibility</h2></div><div class="card-body"><div class="score-ring" style="--score: 89; --ring: var(--green);"><div><strong data-score="a11y">89</strong><small>/100</small></div></div><p class="fix-text">Improve image alt text and contrast decisions across key pages.</p><button class="primary" data-screen-link="accessibility">Improve score</button></div></article>
-          <article class="card score-card"><div class="card-header"><h2>SEO</h2></div><div class="card-body"><div class="score-ring" style="--score: 81; --ring: var(--green);"><div><strong data-score="seo">81</strong><small>/100</small></div></div><p class="fix-text">Keyword suggestions and metadata checks are ready for review.</p><button class="primary" data-screen-link="seo">View SEO</button></div></article>
-          <article class="card score-card"><div class="card-header"><h2>Content Quality</h2></div><div class="card-body"><div class="score-ring" style="--score: 84; --ring: var(--cyan);"><div><strong data-score="content">84</strong><small>/100</small></div></div><p class="fix-text">Titles, descriptions, headings, and thin pages are monitored.</p><button class="primary" data-screen-link="content">Review content</button></div></article>
-          <article class="card wide-card"><div class="card-header"><h2>Score history</h2><span class="muted">Demo trend</span></div><div class="card-body"><svg class="sparkline" viewBox="0 0 560 160" role="img" aria-label="Score history chart"><path d="M20 125 C70 88 90 126 130 78 S210 86 250 58 S330 100 370 52 S450 74 530 34" fill="none" stroke="#2363f6" stroke-width="8" stroke-linecap="round"/><path d="M20 105 C90 112 130 70 190 82 S280 42 340 76 S430 50 530 72" fill="none" stroke="#35c96f" stroke-width="6" stroke-linecap="round" opacity=".8"/><g stroke="#d9e1ec"><line x1="20" y1="130" x2="540" y2="130"/><line x1="20" y1="85" x2="540" y2="85"/><line x1="20" y1="40" x2="540" y2="40"/></g></svg></div></article>
-          <article class="card wide-card"><div class="card-header"><h2>Tool status</h2></div><div class="card-body status-list"><div class="status-row"><span class="dot"></span><strong>OpenAudit Hub</strong><span>Online</span></div><div class="status-row"><span class="dot"></span><strong>Lighthouse</strong><span>Reports loaded</span></div><div class="status-row"><span class="dot"></span><strong>Pa11y</strong><span>Findings loaded</span></div><div class="status-row"><span class="dot warn"></span><strong>Analytics</strong><span>Demo connector</span></div></div></article>
-        </div></div>
-        <div class="screen" id="accessibility"><h1>Accessibility overview</h1><div class="grid"><article class="card full-card"><div class="card-header"><h2>Score details</h2><button class="primary">Set site target</button></div><div class="card-body grid"><div class="chart-card"><div class="metric-row"><strong>Level A</strong><span>96.3 /100</span></div><div class="bar"><span style="--value:96%; --color:var(--green);"></span></div><div class="metric-row"><strong>Level AA</strong><span>88.4 /100</span></div><div class="bar"><span style="--value:88%; --color:var(--green);"></span></div><div class="metric-row"><strong>Level AAA</strong><span>71.2 /100</span></div><div class="bar"><span style="--value:71%; --color:var(--yellow);"></span></div></div><div class="chart-card"><div class="score-ring" style="--score: 89; --ring: var(--green);"><div><strong>89</strong><small>/100</small></div></div></div><div class="chart-card"><svg class="sparkline" viewBox="0 0 420 160"><path d="M20 120 L70 118 L120 112 L170 110 L220 75 L270 72 L320 70 L390 68" fill="none" stroke="#0c1b55" stroke-width="5"/><path d="M20 75 L390 75" stroke="#a5adba" stroke-width="3" stroke-dasharray="8 8"/></svg></div></div></article><article class="card full-card"><div class="card-header"><h2>Fix these issues to improve your score</h2><button class="primary">Filter</button></div><div class="table-wrap"><table><thead><tr><th>Issue</th><th>Occurrences</th><th>Difficulty</th><th>Responsibility</th><th>Points you can gain</th></tr></thead><tbody><tr><td><span class="link" data-screen-link="issue">Images must have alternate text</span></td><td>14</td><td>Low</td><td>Content</td><td>8.4</td></tr><tr><td>Buttons need accessible names</td><td>6</td><td>Medium</td><td>Development</td><td>5.1</td></tr><tr><td>Color contrast does not meet AA</td><td>11</td><td>Medium</td><td>Design</td><td>4.7</td></tr></tbody></table></div></article></div></div>
-        <div class="screen" id="seo"><h1>SEO overview</h1><div class="grid"><article class="card full-card"><div class="card-header"><h2>Issues and recommendations</h2><span class="badge">YAKE keyword extraction</span></div><div class="card-body grid"><div class="chart-card"><div class="metric-row"><strong>Technical</strong><span>79.1 /100</span></div><div class="bar"><span style="--value:79%; --color:var(--green);"></span></div><div class="metric-row"><strong>Content</strong><span>67.9 /100</span></div><div class="bar"><span style="--value:68%; --color:var(--yellow);"></span></div><div class="metric-row"><strong>User experience</strong><span>89.9 /100</span></div><div class="bar"><span style="--value:90%; --color:var(--green);"></span></div><div class="metric-row"><strong>Mobile</strong><span>99.0 /100</span></div><div class="bar"><span style="--value:99%; --color:var(--green);"></span></div></div><div class="chart-card"><div class="score-ring" style="--score:81; --ring: var(--green);"><div><strong>81</strong><small>/100</small></div></div></div><div class="chart-card"><h2>Keyword suggestions</h2><p class="muted">Current page language suggests these topics should be strengthened.</p><p><span class="badge">led signage</span> <span class="badge">commercial display</span> <span class="badge">digital signs</span></p><p><span class="badge">outdoor led screen</span> <span class="badge">installation service</span></p></div></div></article><article class="card full-card"><div class="table-wrap"><table><thead><tr><th>Recommendation</th><th>Category</th><th>Impact</th><th>Action</th></tr></thead><tbody><tr><td>Missing sitemap reference</td><td>Technical</td><td>High</td><td>Add sitemap to robots.txt</td></tr><tr><td>Meta descriptions are duplicated</td><td>Content</td><td>Medium</td><td>Write unique page summaries</td></tr><tr><td>Target keyword appears late in page copy</td><td>Content</td><td>Medium</td><td>Move primary topic into intro and H1 support copy</td></tr></tbody></table></div></article></div></div>
-        <div class="screen" id="content"><h1>Content Quality</h1><div class="grid"><article class="card full-card"><div class="card-header"><h2>Content governance</h2><span class="muted">Titles, descriptions, headings, language</span></div><div class="table-wrap"><table><thead><tr><th>Page</th><th>Title</th><th>Description</th><th>H1</th><th>Words</th><th>Status</th></tr></thead><tbody><tr><td>/</td><td>Good</td><td>Short</td><td>1</td><td>612</td><td><span class="badge">Needs review</span></td></tr><tr><td>/services</td><td>Long</td><td>Good</td><td>2</td><td>408</td><td><span class="badge">Heading fix</span></td></tr><tr><td>/contact</td><td>Good</td><td>Missing</td><td>1</td><td>188</td><td><span class="badge">Thin content</span></td></tr></tbody></table></div></article></div></div>
-        <div class="screen" id="analytics"><h1>Analytics overview</h1><div class="grid"><article class="card wide-card"><div class="card-header"><h2>Campaign traffic</h2></div><div class="card-body"><strong style="font-size:2.4rem">982</strong><span style="color:var(--green);font-weight:800">+9%</span><svg class="sparkline" viewBox="0 0 560 160"><path d="M20 120 C80 110 110 40 160 88 S230 70 270 38 S330 92 380 58 S470 40 530 90" fill="none" stroke="#35c96f" stroke-width="8" stroke-linecap="round"/><path d="M20 128 C80 122 130 110 170 95 S230 135 280 102 S350 106 390 60 S460 82 530 104" fill="none" stroke="#2363f6" stroke-width="7" stroke-linecap="round"/></svg></div></article><article class="card wide-card"><div class="card-header"><h2>Connector status</h2></div><div class="card-body"><p class="muted">Demo mode uses sample analytics. Production can connect Google Analytics, Search Console, or Matomo.</p><button class="primary">Plan connector</button></div></article></div></div>
-        <div class="screen" id="scan"><h1>Run demo scan</h1><article class="card"><div class="card-header"><h2>Safe interview scan</h2><span class="badge">No Docker required</span></div><div class="card-body scan-panel"><div><p>This simulates the live workflow without waiting for Lighthouse, Pa11y, crawler, and content checks during an interview.</p><div class="progress"><span id="progressBar"></span></div><p id="scanText" class="muted">Ready to run.</p><button class="primary" id="startScan">Start scan</button></div><div class="status-list"><div class="status-row"><span class="dot"></span><strong>Website crawl</strong><span id="s1">Ready</span></div><div class="status-row"><span class="dot"></span><strong>Accessibility</strong><span id="s2">Ready</span></div><div class="status-row"><span class="dot"></span><strong>SEO and performance</strong><span id="s3">Ready</span></div><div class="status-row"><span class="dot"></span><strong>Content quality</strong><span id="s4">Ready</span></div></div></div></article></div>
-        <div class="screen" id="issue"><h1>Issue detail</h1><div class="hero-issue"><div><p class="badge">Accessibility</p><h2>Images must have alternate text</h2><p class="muted">Add meaningful alt text to informative images. Use empty alt text only for decorative images.</p></div><div class="card-body" style="text-align:center;border:1px solid var(--line);border-radius:8px;background:#fff"><span class="muted">Points you can gain</span><strong style="display:block;font-size:3rem">8.4</strong></div></div><div class="steps"><div class="step"><strong>1. Find the image</strong><span class="muted">Open the affected page and inspect the highlighted image.</span></div><div class="step"><strong>2. Decide meaning</strong><span class="muted">If it communicates content, write short human alt text.</span></div><div class="step"><strong>3. Validate</strong><span class="muted">Re-run the scan and confirm the issue disappears.</span></div></div></div>
-        <div class="screen" id="architecture"><h1>Architecture</h1><article class="card"><div class="card-header"><h2>Self-hosted Docker stack</h2></div><div class="card-body"><p>OpenAudit Hub combines open-source tools into one website governance workflow.</p><div class="steps"><div class="step"><strong>Portal</strong><span class="muted">Flask dashboard, websites, issues, reports, page inspector.</span></div><div class="step"><strong>Scan worker</strong><span class="muted">Crawler, Lighthouse, Pa11y, LinkChecker, content rules, keyword extraction.</span></div><div class="step"><strong>Storage</strong><span class="muted">Reports, database records, history, and exported audit artifacts.</span></div></div></div></article></div>
+        <div class="filters">
+          <select class="control" id="site">
+            <option value="truckhardware">Truck Hardware Australia - https://truckhardware.com.au</option>
+          </select>
+          <select class="control"><option>Scan snapshot: 23 Jun 2026</option><option>Last audit</option><option>Interview demo dataset</option></select>
+          <button class="control" data-link="scan">Run demo scan</button>
+        </div>
+
+        <div class="screen active" id="dashboard">
+          <h1>Dashboard</h1>
+          <div class="grid">
+            <section class="banner">
+              <div>
+                <span class="badge good">Static interview demo</span>
+                <strong>Truck Hardware Australia audit snapshot.</strong>
+                <p class="muted">This demo shows how one real public website can move from scan results to a clear action plan. It uses 3 Lighthouse summaries, 20 Pa11y page checks, and 279 grouped accessibility findings.</p>
+                <button class="btn primary" data-link="summary">Start with the story</button>
+                <button class="btn" data-link="scan">Show scan workflow</button>
+              </div>
+              <div class="mini">
+                <div><strong>What this proves</strong><span class="muted">The product can turn raw findings into priorities a team can act on.</span></div>
+                <div><strong>Why it is safe</strong><span class="muted">Public demo data only, with no raw report files or private configuration exposed.</span></div>
+              </div>
+            </section>
+
+            <article class="card score"><div class="head"><h2>Digital Certainty Index</h2></div><div class="body"><div class="ring" id="ring-dci" style="--score:79;--color:var(--yellow)"><div><strong data-score="dci">79</strong><small>/100</small></div></div><p class="center">Fix <span class="link" data-link="issue">image alt text and contrast</span> to improve the site score.</p></div></article>
+            <article class="card score"><div class="head"><h2>Accessibility</h2></div><div class="body"><div class="ring" id="ring-a11y" style="--score:82;--color:var(--green)"><div><strong data-score="a11y">82</strong><small>/100</small></div></div><p class="center">279 findings across 20 checked pages, mostly alt text, contrast, and unnamed controls.</p></div></article>
+            <article class="card score"><div class="head"><h2>SEO</h2></div><div class="body"><div class="ring" id="ring-seo" style="--score:82;--color:var(--green)"><div><strong data-score="seo">82</strong><small>/100</small></div></div><p class="center">Lighthouse SEO ranged from 77 to 85 across sampled pages.</p></div></article>
+            <article class="card score"><div class="head"><h2>Performance</h2></div><div class="body"><div class="ring" id="ring-content" style="--score:79;--color:var(--cyan)"><div><strong data-score="content">79</strong><small>/100</small></div></div><p class="center">Product pages varied from 62 to 88, showing useful optimization opportunities.</p></div></article>
+
+            <article class="card wide"><div class="head"><h2>Why this site matters</h2><span class="muted">Interview talking points</span></div><div class="body"><div class="steps"><div class="step"><strong>Repeated template issues</strong><span class="muted">The same defects appear across product pages, so one fix can improve many URLs.</span></div><div class="step"><strong>Clear quick wins</strong><span class="muted">Alt text, control names, and contrast account for most findings.</span></div><div class="step"><strong>Measurable outcome</strong><span class="muted">The demo can show a believable path from 279 findings down to a stronger re-audit result.</span></div></div></div></article>
+            <article class="card wide"><div class="head"><h2>Snapshot at a glance</h2></div><div class="body"><div class="status"><span class="dot"></span><strong>Website</strong><span>truckhardware.com.au</span></div><div class="status"><span class="dot"></span><strong>Scan coverage</strong><span>20 pages checked</span></div><div class="status"><span class="dot"></span><strong>Technical sample</strong><span>3 Lighthouse reports</span></div><div class="status"><span class="dot warn"></span><strong>Main opportunity</strong><span>279 grouped accessibility findings</span></div></div></article>
+          </div>
+        </div>
+
+        <div class="screen" id="summary">
+          <h1>Executive summary</h1>
+          <div class="grid">
+            <article class="card full"><div class="head"><h2>What this site needs first</h2><button class="btn" data-link="improvements">Show improvement story</button></div><div class="body split"><div><h3>Top takeaway</h3><p class="muted">Truck Hardware is in solid shape overall, but repeated template issues are dragging down accessibility and consistency. The biggest return comes from fixing shared product-page components once rather than editing pages one by one.</p></div><div><h3>What to do next</h3><p class="muted">Prioritize image alt text, control naming, and contrast cleanup. Those three themes account for most findings and are realistic to explain in an interview as content-plus-theme work.</p></div></div></article>
+            <article class="card third"><div class="head"><h2>Largest risk</h2></div><div class="body"><strong>Repeated template issues</strong><p class="muted">Product-page patterns generate the same problems across multiple URLs.</p></div></article>
+            <article class="card third"><div class="head"><h2>Fastest win</h2></div><div class="body"><strong>Image alt text</strong><p class="muted">A focused content and theme pass can remove up to 97 image-related findings.</p></div></article>
+            <article class="card third"><div class="head"><h2>Best interview line</h2></div><div class="body"><strong>Fix once, improve many pages</strong><p class="muted">This sounds strategic and shows platform thinking instead of page-by-page patching.</p></div></article>
+            <article class="card full"><div class="head"><h2>Recommended first 30 days</h2></div><div class="table"><table><thead><tr><th>Week</th><th>Goal</th><th>Owner</th><th>Outcome</th></tr></thead><tbody><tr><td>Week 1</td><td>Confirm template-level accessibility defects</td><td>Development</td><td>Clear list of reusable fixes</td></tr><tr><td>Week 2</td><td>Update alt text and link purpose across key product imagery</td><td>Content</td><td>Image issue count starts falling quickly</td></tr><tr><td>Week 3</td><td>Fix control names and form labels in Shopify theme components</td><td>Development</td><td>Shared product pages become more usable</td></tr><tr><td>Week 4</td><td>Re-run audit and show score movement</td><td>Platform owner</td><td>Demonstrable before/after story</td></tr></tbody></table></div></article>
+          </div>
+        </div>
+
+        <div class="screen" id="accessibility">
+          <h1>Accessibility overview</h1>
+          <div class="grid">
+            <article class="card full"><div class="head"><h2>Score details</h2><button class="btn">Set site target</button></div><div class="body split"><div><div class="row"><strong>Image alternatives</strong><span>97 findings</span></div><div class="bar"><span style="--v:65%;--c:var(--orange)"></span></div><div class="row"><strong>Control names and labels</strong><span>115 findings</span></div><div class="bar"><span style="--v:58%;--c:var(--orange)"></span></div><div class="row"><strong>Colour contrast</strong><span>48 findings</span></div><div class="bar"><span style="--v:72%;--c:var(--yellow)"></span></div></div><div><div class="ring" style="--score:82;--color:var(--green)"><div><strong>82</strong><small>/100</small></div></div></div></div></article>
+            <article class="card full"><div class="head"><h2>Fix these issues to improve your score</h2><button class="btn" data-link="plan">Create activity plan</button></div><div class="table"><table><thead><tr><th>Issue</th><th>Occurrences</th><th>Difficulty</th><th>Responsibility</th><th>Suggested action</th></tr></thead><tbody><tr><td><span class="link" data-link="issue">Images missing alt attributes</span></td><td>58</td><td>Low</td><td>Content</td><td>Add meaningful alt text for product and logo images.</td></tr><tr><td>Buttons do not have accessible names</td><td>58</td><td>Medium</td><td>Development</td><td>Add visible text, aria-label, or aria-labelledby.</td></tr><tr><td>Text contrast below WCAG AA</td><td>48</td><td>Medium</td><td>Design</td><td>Increase foreground/background contrast to at least 4.5:1.</td></tr><tr><td>Image links missing link purpose</td><td>39</td><td>Low</td><td>Content</td><td>Describe the destination or product in link image alt text.</td></tr></tbody></table></div></article>
+          </div>
+        </div>
+
+        <div class="screen" id="seo">
+          <h1>SEO overview</h1>
+          <div class="grid">
+            <article class="card full"><div class="head"><h2>Issues and recommendations</h2><span class="badge">Lighthouse + keyword summary</span></div><div class="body split"><div><div class="row"><strong>Homepage SEO</strong><span>77 /100</span></div><div class="bar"><span style="--v:77%;--c:var(--green)"></span></div><div class="row"><strong>Product page SEO</strong><span>85 /100</span></div><div class="bar"><span style="--v:85%;--c:var(--green)"></span></div><div class="row"><strong>Best practices</strong><span>78-81 /100</span></div><div class="bar"><span style="--v:80%;--c:var(--green)"></span></div></div><div><h2>Keyword suggestions</h2><p class="muted">Demo keywords are based on the public product catalogue and page language.</p><p><span class="badge">truck hardware</span> <span class="badge">ratchet tie down</span> <span class="badge">load restraint</span></p><p><span class="badge">trailer parts</span> <span class="badge">fasteners</span> <span class="badge">cargo control</span></p></div></div></article>
+            <article class="card full"><div class="table"><table><thead><tr><th>Recommendation</th><th>Category</th><th>Impact</th><th>Action</th></tr></thead><tbody><tr><td>Improve product page performance consistency</td><td>Performance</td><td>High</td><td>One sampled product page scored 62 while others reached 88.</td></tr><tr><td>Strengthen homepage SEO basics</td><td>SEO</td><td>Medium</td><td>Homepage SEO scored 77; improve titles, descriptions, and structured content.</td></tr><tr><td>Use keyword clusters in category copy</td><td>Content</td><td>Medium</td><td>Group copy around load restraint, tie downs, trailer parts, and truck hardware.</td></tr></tbody></table></div></article>
+          </div>
+        </div>
+
+        <div class="screen" id="content">
+          <h1>Content Quality</h1>
+          <div class="grid">
+            <article class="card third"><div class="head"><h2>Pages checked</h2></div><div class="body"><strong>20</strong><p class="muted">Home and product pages from the scan snapshot.</p></div></article>
+            <article class="card third"><div class="head"><h2>Product focus</h2></div><div class="body"><strong>Ratchet tie downs</strong><p class="muted">Several affected pages are product detail pages.</p></div></article>
+            <article class="card third"><div class="head"><h2>Content action</h2></div><div class="body"><strong>Alt text + descriptions</strong><p class="muted">Most quick wins are content-side fixes.</p></div></article>
+            <article class="card full"><div class="head"><h2>Content governance</h2><span class="muted">Public page examples from the audit</span></div><div class="table"><table><thead><tr><th>Page</th><th>Issue theme</th><th>Findings</th><th>Owner</th><th>Status</th></tr></thead><tbody><tr><td>/</td><td>Logo alt text, colour contrast, unnamed close button</td><td>6</td><td>Content / Dev</td><td><span class="badge warn">Needs review</span></td></tr><tr><td>/products/25mmx6m-ratchet-tie-down-500kg</td><td>Form labels, controls, image alternatives</td><td>15</td><td>Development</td><td><span class="badge warn">High priority</span></td></tr><tr><td>/products/50mmx6m-endless-h-d-ratchet-tiedown</td><td>Repeated product template accessibility issues</td><td>15</td><td>Template</td><td><span class="badge warn">Template fix</span></td></tr></tbody></table></div></article>
+          </div>
+        </div>
+
+        <div class="screen" id="analytics">
+          <h1>Analytics overview</h1>
+          <div class="grid">
+            <article class="card wide"><div class="head"><h2>Campaign traffic</h2></div><div class="body"><strong style="font-size:2.4rem">982</strong> <span style="color:var(--green);font-weight:800">+9%</span><svg class="spark" viewBox="0 0 560 160"><path d="M20 120 C80 110 110 40 160 88 S230 70 270 38 S330 92 380 58 S470 40 530 90" fill="none" stroke="#35c96f" stroke-width="8" stroke-linecap="round"/><path d="M20 128 C80 122 130 110 170 95 S230 135 280 102 S350 106 390 60 S460 82 530 104" fill="none" stroke="#2363f6" stroke-width="7" stroke-linecap="round"/></svg></div></article>
+            <article class="card wide"><div class="head"><h2>Connector status</h2></div><div class="body"><p class="muted">Demo mode uses sample analytics. Production can connect Google Analytics, Search Console, or Matomo.</p><button class="btn">Plan connector</button></div></article>
+          </div>
+        </div>
+
+        <div class="screen" id="scan">
+          <h1>Run demo scan</h1>
+          <article class="card"><div class="head"><h2>Safe interview scan</h2><span class="badge good">Uses saved Truck Hardware snapshot</span></div><div class="body split"><div><p>This simulates the live workflow using the saved Truck Hardware audit summary. The full Docker version can run the same workflow against a fresh URL.</p><div class="progress"><span id="progress"></span></div><p id="scantext" class="muted">Ready to replay the audit.</p><button class="btn primary" id="start">Replay scan</button></div><div><div class="status"><span class="dot"></span><strong>Website crawl</strong><span class="s">20 pages</span></div><div class="status"><span class="dot"></span><strong>Accessibility</strong><span class="s">279 findings</span></div><div class="status"><span class="dot"></span><strong>SEO and performance</strong><span class="s">3 Lighthouse reports</span></div><div class="status"><span class="dot"></span><strong>Content quality</strong><span class="s">Template issues grouped</span></div></div></div></article>
+        </div>
+
+        <div class="screen" id="issue">
+          <h1>Issue detail</h1>
+          <div class="issuehero"><div><p class="badge">Accessibility</p><h2>Images missing alt attributes</h2><p class="muted">Pa11y found 58 image elements without alt attributes and 39 linked images missing link purpose across the Truck Hardware snapshot.</p></div><div class="body card" style="text-align:center"><span class="muted">Occurrences</span><strong style="display:block;font-size:3rem">97</strong></div></div>
+          <div class="steps"><div class="step"><strong>1. Identify template images</strong><span class="muted">Fix repeated logo/product image patterns once in the Shopify theme.</span></div><div class="step"><strong>2. Write meaningful alternatives</strong><span class="muted">Describe product type, purpose, or destination for linked images.</span></div><div class="step"><strong>3. Re-run Pa11y</strong><span class="muted">Confirm H37 and H30.2 findings disappear from affected pages.</span></div></div>
+        </div>
+
+        <div class="screen" id="improvements">
+          <h1>Before / after</h1>
+          <div class="stack">
+            <div class="callout">
+              <strong>This page gives you the interview story.</strong>
+              <p class="muted">Use it to explain how OpenAudit Hub is not only about finding issues, but about driving measurable improvement after the scan.</p>
+            </div>
+            <div class="compare">
+              <div class="panel">
+                <span class="badge warn">Before</span>
+                <h2 style="margin-top:12px">Initial audit snapshot</h2>
+                <div class="site-meta">
+                  <div class="metric"><span class="muted">Accessibility findings</span><strong>279</strong></div>
+                  <div class="metric"><span class="muted">DCI</span><strong>79</strong></div>
+                  <div class="metric"><span class="muted">A11y score</span><strong>82</strong></div>
+                </div>
+                <ul>
+                  <li>58 images without alt text</li>
+                  <li>58 unnamed buttons or controls</li>
+                  <li>48 contrast failures</li>
+                  <li>Template issues repeated across product pages</li>
+                </ul>
+              </div>
+              <div class="panel">
+                <span class="badge good">After</span>
+                <h2 style="margin-top:12px">Projected first improvement cycle</h2>
+                <div class="site-meta">
+                  <div class="metric"><span class="muted">Accessibility findings</span><strong>143</strong></div>
+                  <div class="metric"><span class="muted">DCI</span><strong>85</strong></div>
+                  <div class="metric"><span class="muted">A11y score</span><strong>90</strong></div>
+                </div>
+                <ul>
+                  <li>Most image issues removed through theme and content updates</li>
+                  <li>Shared controls named once in reusable components</li>
+                  <li>High-visibility contrast defects cleaned up</li>
+                  <li>Clear re-audit story for leadership and clients</li>
+                </ul>
+              </div>
+            </div>
+            <article class="card full"><div class="head"><h2>What changed</h2></div><div class="table"><table><thead><tr><th>Improvement</th><th>Why it matters</th><th>Expected result</th></tr></thead><tbody><tr><td>Alt text rollout</td><td>Removes the most frequent accessibility failure</td><td>Large drop in image-related findings</td></tr><tr><td>Theme control naming</td><td>Improves keyboard and screen-reader usability on every product page</td><td>Cleaner product-page template health</td></tr><tr><td>Contrast pass</td><td>Improves readability and visual accessibility</td><td>Fewer AA failures and clearer UI</td></tr></tbody></table></div></article>
+          </div>
+        </div>
+
+        <div class="screen" id="plan">
+          <h1>Activity plan</h1>
+          <div class="grid">
+            <article class="card third"><div class="head"><h2>High impact</h2></div><div class="body"><strong>3 tasks</strong><p class="muted">Fixes that reduce the largest number of findings.</p></div></article>
+            <article class="card third"><div class="head"><h2>Quick wins</h2></div><div class="body"><strong>97 image issues</strong><p class="muted">Alt text fixes can often be handled by content/template updates.</p></div></article>
+            <article class="card third"><div class="head"><h2>Owner split</h2></div><div class="body"><strong>Content + Dev</strong><p class="muted">The issues are split between content assets and Shopify theme controls.</p></div></article>
+            <article class="card full"><div class="head"><h2>Recommended next actions</h2></div><div class="table"><table><thead><tr><th>Task</th><th>Owner</th><th>Impact</th><th>Validation</th></tr></thead><tbody><tr><td>Add alt text to product, logo, and linked images</td><td>Content / Theme</td><td>High</td><td>H37 and H30.2 findings drop from 97 to near zero</td></tr><tr><td>Name close buttons, quantity inputs, selects, and empty links</td><td>Development</td><td>High</td><td>H91 and F68 findings are removed from product templates</td></tr><tr><td>Increase contrast for header/footer and product labels</td><td>Design / CSS</td><td>Medium</td><td>G18 contrast failures meet 4.5:1</td></tr></tbody></table></div></article>
+          </div>
+        </div>
+
+        <div class="screen" id="inspector">
+          <h1>Page inspector</h1>
+          <div class="grid">
+            <article class="card full"><div class="head"><h2>https://truckhardware.com.au/products/25mmx6m-ratchet-tie-down-500kg</h2><span class="badge warn">15 findings</span></div><div class="body"><div class="steps"><div class="step"><strong>HTTP 200</strong><span class="muted">Product page is reachable.</span></div><div class="step"><strong>Template issue</strong><span class="muted">Same patterns appear across multiple product pages.</span></div><div class="step"><strong>Performance variance</strong><span class="muted">Sampled product pages ranged from 62 to 88.</span></div></div></div></article>
+            <article class="card full"><div class="head"><h2>Evidence summary</h2></div><div class="body timeline"><article><strong>Images missing alt attributes</strong><p class="muted"><span class="kbd">img.lazyload</span> patterns need meaningful product or logo alternatives.</p></article><article><strong>Controls without accessible names</strong><p class="muted">Quantity fields, selects, and close buttons need labels or aria-label text.</p></article><article><strong>Contrast below WCAG AA</strong><p class="muted">Some header/footer text colours need higher contrast against their backgrounds.</p></article></div></article>
+          </div>
+        </div>
+
+        <div class="screen" id="architecture">
+          <h1>Architecture</h1>
+          <article class="card"><div class="head"><h2>Self-hosted Docker stack</h2></div><div class="body"><p>OpenAudit Hub combines mature open-source tools into one website governance workflow.</p><div class="steps"><div class="step"><strong>Portal</strong><span class="muted">Flask dashboard, websites, issues, reports, page inspector.</span></div><div class="step"><strong>Scan worker</strong><span class="muted">Crawler, Lighthouse, Pa11y, LinkChecker, content rules, keyword extraction.</span></div><div class="step"><strong>Storage</strong><span class="muted">Reports, database records, history, and exported audit artifacts.</span></div></div></div></article>
+        </div>
       </section>
     </main>
   </div>
+
   <script>
-    const sidebar = document.querySelector("#sidebar");
-    const menuButton = document.querySelector("#menuButton");
-    const navItems = [...document.querySelectorAll(".nav-item")];
+    const side = document.querySelector("#side");
+    const nav = [...document.querySelectorAll(".nav")];
     const screens = [...document.querySelectorAll(".screen")];
-    const scores = { truvision: { dci: 78, a11y: 89, seo: 81, content: 84 }, piranha: { dci: 72, a11y: 82, seo: 76, content: 79 }, struts: { dci: 69, a11y: 75, seo: 73, content: 81 } };
-    function showScreen(id) { screens.forEach(screen => screen.classList.toggle("active", screen.id === id)); navItems.forEach(item => item.classList.toggle("active", item.dataset.screen === id)); sidebar.classList.remove("open"); if (id === "scan") runScan(false); window.scrollTo({ top: 0, behavior: "smooth" }); }
-    navItems.forEach(item => item.addEventListener("click", () => showScreen(item.dataset.screen)));
-    document.querySelectorAll("[data-screen-link]").forEach(link => { link.addEventListener("click", () => showScreen(link.dataset.screenLink)); });
-    menuButton.addEventListener("click", () => sidebar.classList.toggle("open"));
-    document.querySelector("#demoScanButton").addEventListener("click", () => showScreen("scan"));
-    document.querySelector("#siteSelect").addEventListener("change", event => { const selected = scores[event.target.value]; Object.entries(selected).forEach(([key, value]) => { document.querySelectorAll(`[data-score="${key}"]`).forEach(el => el.textContent = value); }); });
-    document.querySelector("#menuSearch").addEventListener("input", event => { const query = event.target.value.toLowerCase(); navItems.forEach(item => item.style.display = item.textContent.toLowerCase().includes(query) ? "flex" : "none"); });
-    function runScan(force) { const progress = document.querySelector("#progressBar"); const text = document.querySelector("#scanText"); const labels = ["#s1", "#s2", "#s3", "#s4"].map(id => document.querySelector(id)); if (!force && progress.dataset.done === "true") return; progress.dataset.done = "false"; progress.style.width = "0"; text.textContent = "Starting safe demo scan..."; labels.forEach(label => label.textContent = "Queued"); const steps = [[25, "Crawling website pages...", 0], [50, "Checking accessibility and WCAG findings...", 1], [75, "Reviewing SEO, performance, and keywords...", 2], [100, "Content quality report ready.", 3]]; steps.forEach(([width, message, index], stepIndex) => { setTimeout(() => { progress.style.width = `${width}%`; text.textContent = message; labels[index].textContent = "Complete"; if (stepIndex === steps.length - 1) progress.dataset.done = "true"; }, 500 + stepIndex * 650); }); }
-    document.querySelector("#startScan").addEventListener("click", () => runScan(true));
+    const scoreSets = {
+      truckhardware: { dci: 79, a11y: 82, seo: 82, content: 79 }
+    };
+
+    function go(id) {
+      screens.forEach(screen => screen.classList.toggle("active", screen.id === id));
+      nav.forEach(item => item.classList.toggle("active", item.dataset.go === id));
+      side.classList.remove("open");
+      if (id === "scan") run(false);
+      scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    function setScores(values) {
+      Object.entries(values).forEach(([key, value]) => {
+        document.querySelectorAll(`[data-score="${key}"]`).forEach(el => el.textContent = value);
+        const ring = document.querySelector(`#ring-${key}`);
+        if (ring) ring.style.setProperty("--score", value);
+      });
+    }
+
+    nav.forEach(item => item.onclick = () => go(item.dataset.go));
+    document.querySelectorAll("[data-link]").forEach(item => item.onclick = () => go(item.dataset.link));
+    document.querySelector("#menu").onclick = () => side.classList.toggle("open");
+    document.querySelector("#search").oninput = event => {
+      const query = event.target.value.toLowerCase();
+      nav.forEach(item => item.style.display = item.textContent.toLowerCase().includes(query) ? "flex" : "none");
+    };
+    document.querySelector("#site").onchange = event => setScores(scoreSets[event.target.value]);
+
+    function run(force) {
+      const progress = document.querySelector("#progress");
+      const text = document.querySelector("#scantext");
+      const labels = [...document.querySelectorAll(".s")];
+      if (!force && progress.dataset.done === "true") return;
+      progress.dataset.done = "false";
+      progress.style.width = "0";
+      text.textContent = "Replaying saved Truck Hardware audit...";
+      labels.forEach(label => label.textContent = "Queued");
+      [[25, "Loading 20 crawled pages...", 0], [50, "Grouping 279 Pa11y findings...", 1], [75, "Reviewing 3 Lighthouse reports...", 2], [100, "Truck Hardware audit summary ready. Dashboard scores refreshed.", 3]].forEach(([width, message, index], step) => {
+        setTimeout(() => {
+          progress.style.width = width + "%";
+          text.textContent = message;
+          labels[index].textContent = "Complete";
+          if (width === 100) {
+            progress.dataset.done = "true";
+            setScores({ dci: 81, a11y: 84, seo: 83, content: 81 });
+          }
+        }, 500 + step * 650);
+      });
+    }
+
+    document.querySelector("#start").onclick = () => run(true);
   </script>
 </body>
 </html>

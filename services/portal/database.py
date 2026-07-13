@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import hashlib
+import json
 import ipaddress
 import re
 import socket
@@ -10,7 +12,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, create_engine, select, text as sql_text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, create_engine, inspect, select, text as sql_text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 
@@ -32,6 +34,11 @@ class Website(Base):
     schedule: Mapped[str] = mapped_column(String(80), default="manual", nullable=False)
     max_pages: Mapped[int] = mapped_column(Integer, default=100, nullable=False)
     exclude_paths: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    budget_performance: Mapped[int] = mapped_column(Integer, default=70, nullable=False)
+    budget_accessibility: Mapped[int] = mapped_column(Integer, default=80, nullable=False)
+    budget_seo: Mapped[int] = mapped_column(Integer, default=80, nullable=False)
+    budget_lcp_ms: Mapped[int] = mapped_column(Integer, default=2500, nullable=False)
+    budget_cls: Mapped[float] = mapped_column(Float, default=0.1, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
@@ -85,6 +92,13 @@ class CrawlPage(Base):
     website_key: Mapped[str] = mapped_column(ForeignKey("websites.key", ondelete="CASCADE"), index=True)
     url: Mapped[str] = mapped_column(String(2048), nullable=False)
     title: Mapped[str] = mapped_column(Text, default="")
+    meta_description: Mapped[str] = mapped_column(Text, default="")
+    language: Mapped[str] = mapped_column(String(40), default="")
+    word_count: Mapped[int] = mapped_column(Integer, default=0)
+    h1_count: Mapped[int] = mapped_column(Integer, default=0)
+    content_hash: Mapped[str] = mapped_column(String(64), default="")
+    content_simhash: Mapped[str] = mapped_column(String(16), default="")
+    technical_data: Mapped[str] = mapped_column(Text, default="{}")
     status_code: Mapped[int] = mapped_column(Integer, default=0)
     depth: Mapped[int] = mapped_column(Integer, default=0)
     source: Mapped[str] = mapped_column(String(80), default="internal-link")
@@ -102,7 +116,49 @@ class IssueEvidence(Base):
     selector: Mapped[str] = mapped_column(Text, default="")
     snippet: Mapped[str] = mapped_column(Text, default="")
     explanation: Mapped[str] = mapped_column(Text, default="")
+    screenshot_path: Mapped[str] = mapped_column(String(2048), default="")
+    highlight: Mapped[str] = mapped_column(Text, default="")
     captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class KeywordAction(Base):
+    __tablename__ = "keyword_actions"
+    __table_args__ = (
+        UniqueConstraint("website_key", "action_key", name="uq_keyword_action_website_key"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    website_key: Mapped[str] = mapped_column(ForeignKey("websites.key", ondelete="CASCADE"), index=True)
+    action_key: Mapped[str] = mapped_column(String(64), index=True)
+    page_url: Mapped[str] = mapped_column(Text, default="")
+    keyword: Mapped[str] = mapped_column(String(500), default="")
+    decision: Mapped[str] = mapped_column(String(160), default="Improve existing page")
+    status: Mapped[str] = mapped_column(String(40), default="suggested", index=True)
+    owner: Mapped[str] = mapped_column(String(255), default="Unassigned")
+    note: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ContentAction(Base):
+    __tablename__ = "content_actions"
+    __table_args__ = (UniqueConstraint("website_key", "action_key", name="uq_content_action_website_key"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    website_key: Mapped[str] = mapped_column(ForeignKey("websites.key", ondelete="CASCADE"), index=True)
+    action_key: Mapped[str] = mapped_column(String(64), index=True)
+    action_type: Mapped[str] = mapped_column(String(80), default="duplicate-content")
+    title: Mapped[str] = mapped_column(Text, default="Content action")
+    primary_url: Mapped[str] = mapped_column(Text, default="")
+    affected_urls: Mapped[str] = mapped_column(Text, default="[]")
+    status: Mapped[str] = mapped_column(String(40), default="suggested", index=True)
+    owner: Mapped[str] = mapped_column(String(255), default="Unassigned")
+    note: Mapped[str] = mapped_column(Text, default="")
+    points: Mapped[float] = mapped_column(Float, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 _DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///openaudit.db")
@@ -116,11 +172,57 @@ SessionLocal = sessionmaker(bind=_engine, expire_on_commit=False)
 
 def init_database(urls_file: Path | None = None) -> None:
     Base.metadata.create_all(_engine)
+    ensure_compatible_schema()
     if urls_file and urls_file.exists():
         for line in urls_file.read_text(encoding="utf-8").splitlines():
             url = line.strip()
             if url and not url.startswith("#"):
                 ensure_website(url, source_name="Imported website")
+
+
+def ensure_compatible_schema() -> None:
+    """Add safe columns for older local demo databases without touching rows."""
+    migrations = {
+        "audit_issues": [
+            ("source", "VARCHAR(40) DEFAULT 'lighthouse'"),
+            ("affected_pages", "INTEGER DEFAULT 1"),
+            ("source_report", "VARCHAR(2048) DEFAULT ''"),
+            ("ignored_reason", "TEXT DEFAULT ''"),
+        ],
+        "websites": [
+            ("budget_performance", "INTEGER DEFAULT 70"),
+            ("budget_accessibility", "INTEGER DEFAULT 80"),
+            ("budget_seo", "INTEGER DEFAULT 80"),
+            ("budget_lcp_ms", "INTEGER DEFAULT 2500"),
+            ("budget_cls", "FLOAT DEFAULT 0.1"),
+        ],
+        "crawl_pages": [
+            ("meta_description", "TEXT DEFAULT ''"),
+            ("language", "VARCHAR(40) DEFAULT ''"),
+            ("word_count", "INTEGER DEFAULT 0"),
+            ("h1_count", "INTEGER DEFAULT 0"),
+            ("content_hash", "VARCHAR(64) DEFAULT ''"),
+            ("content_simhash", "VARCHAR(16) DEFAULT ''"),
+            ("technical_data", "TEXT DEFAULT '{}'"),
+            ("source", "VARCHAR(80) DEFAULT 'internal-link'"),
+            ("content_type", "VARCHAR(255) DEFAULT ''"),
+            ("error", "TEXT DEFAULT ''"),
+        ],
+        "issue_evidence": [
+            ("screenshot_path", "VARCHAR(2048) DEFAULT ''"),
+            ("highlight", "TEXT DEFAULT ''"),
+        ],
+    }
+    inspector = inspect(_engine)
+    with _engine.begin() as connection:
+        for table_name, columns in migrations.items():
+            try:
+                existing_columns = {column["name"] for column in inspector.get_columns(table_name)}
+            except Exception:
+                continue
+            for column_name, definition in columns:
+                if column_name not in existing_columns:
+                    connection.execute(sql_text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}"))
 
 
 def database_is_ready() -> bool:
@@ -226,6 +328,11 @@ def create_website(payload: dict[str, Any]) -> dict[str, Any]:
             schedule=str(payload.get("schedule") or "manual"),
             max_pages=max(1, min(int(payload.get("max_pages") or 100), 10000)),
             exclude_paths=str(payload.get("exclude_paths") or "").strip(),
+            budget_performance=budget_score(payload.get("budget_performance"), 70),
+            budget_accessibility=budget_score(payload.get("budget_accessibility"), 80),
+            budget_seo=budget_score(payload.get("budget_seo"), 80),
+            budget_lcp_ms=budget_lcp(payload.get("budget_lcp_ms"), 2500),
+            budget_cls=budget_cls_value(payload.get("budget_cls"), 0.1),
         )
         session.add(website)
         return website_dict(website)
@@ -246,6 +353,16 @@ def update_website(key: str, payload: dict[str, Any]) -> dict[str, Any] | None:
             website.max_pages = max(1, min(int(payload["max_pages"]), 10000))
         if "exclude_paths" in payload:
             website.exclude_paths = str(payload["exclude_paths"] or "").strip()
+        if "budget_performance" in payload:
+            website.budget_performance = budget_score(payload["budget_performance"], website.budget_performance)
+        if "budget_accessibility" in payload:
+            website.budget_accessibility = budget_score(payload["budget_accessibility"], website.budget_accessibility)
+        if "budget_seo" in payload:
+            website.budget_seo = budget_score(payload["budget_seo"], website.budget_seo)
+        if "budget_lcp_ms" in payload:
+            website.budget_lcp_ms = budget_lcp(payload["budget_lcp_ms"], website.budget_lcp_ms)
+        if "budget_cls" in payload:
+            website.budget_cls = budget_cls_value(payload["budget_cls"], website.budget_cls)
         website.updated_at = utcnow()
         return website_dict(website)
 
@@ -340,6 +457,13 @@ def replace_crawl_pages(website_key_value: str, pages: list[dict[str, Any]]) -> 
                 row = CrawlPage(website_key=website_key_value, url=url)
                 session.add(row)
             row.title = str(page.get("title") or "")
+            row.meta_description = str(page.get("meta_description") or "")
+            row.language = str(page.get("language") or "")[:40]
+            row.word_count = max(0, int(page.get("word_count") or 0))
+            row.h1_count = max(0, int(page.get("h1_count") or 0))
+            row.content_hash = str(page.get("content_hash") or "")[:64]
+            row.content_simhash = str(page.get("content_simhash") or "")[:16]
+            row.technical_data = json.dumps(page.get("technical_data") or {}, ensure_ascii=False)
             row.status_code = int(page.get("status_code") or 0)
             row.depth = int(page.get("depth") or 0)
             row.source = str(page.get("source") or "internal-link")
@@ -450,6 +574,8 @@ def reconcile_issues(
                         selector=str(example.get("selector") or ""),
                         snippet=str(example.get("snippet") or ""),
                         explanation=str(example.get("explanation") or ""),
+                        screenshot_path=Path(str(example.get("screenshot_path") or "")).name,
+                        highlight=str(example.get("highlight") or ""),
                     )
                 )
 
@@ -499,13 +625,132 @@ def update_issue_status(issue_id: str, status: str, owner: str = "", ignored_rea
         return issue_dict(issue)
 
 
+KEYWORD_ACTION_STATUSES = {"suggested", "accepted", "in_progress", "completed", "ignored"}
+CONTENT_ACTION_STATUSES = KEYWORD_ACTION_STATUSES
+
+
+def keyword_action_key(page_url: str, keyword: str) -> str:
+    identity = f"{str(page_url or '').strip().rstrip('/').lower()}\n{str(keyword or '').strip().lower()}"
+    return hashlib.sha256(identity.encode("utf-8")).hexdigest()
+
+
+def list_keyword_actions(website_key_value: str) -> list[dict[str, Any]]:
+    with SessionLocal() as session:
+        statement = (
+            select(KeywordAction)
+            .where(KeywordAction.website_key == website_key_value)
+            .order_by(KeywordAction.updated_at.desc())
+        )
+        return [keyword_action_dict(row) for row in session.scalars(statement)]
+
+
+def content_action_key(action_type: str, primary_url: str, title: str) -> str:
+    identity = f"{action_type.strip().lower()}\n{primary_url.strip().rstrip('/').lower()}\n{title.strip().lower()}"
+    return hashlib.sha256(identity.encode("utf-8")).hexdigest()
+
+
+def list_content_actions(website_key_value: str) -> list[dict[str, Any]]:
+    with SessionLocal() as session:
+        statement = select(ContentAction).where(ContentAction.website_key == website_key_value).order_by(ContentAction.updated_at.desc())
+        return [content_action_dict(row) for row in session.scalars(statement)]
+
+
+def upsert_content_action(website_key_value: str, action_type: str, title: str, primary_url: str,
+                          affected_urls: list[str], status: str, owner: str = "", note: str = "",
+                          points: float = 0) -> dict[str, Any]:
+    if status not in CONTENT_ACTION_STATUSES:
+        raise ValueError("Invalid content action status.")
+    key = content_action_key(action_type, primary_url, title)
+    now = utcnow()
+    with SessionLocal.begin() as session:
+        action = session.scalar(select(ContentAction).where(ContentAction.website_key == website_key_value, ContentAction.action_key == key))
+        if action is None:
+            action = ContentAction(website_key=website_key_value, action_key=key)
+            session.add(action)
+        action.action_type = action_type[:80]
+        action.title = title
+        action.primary_url = primary_url
+        action.affected_urls = json.dumps(list(dict.fromkeys(affected_urls)))
+        action.status = status
+        action.owner = owner.strip() or "Unassigned"
+        action.note = note.strip()
+        action.points = max(0, float(points or 0))
+        action.updated_at = now
+        action.completed_at = now if status == "completed" else None
+        session.flush()
+        return content_action_dict(action)
+
+
+def upsert_keyword_action(
+    website_key_value: str,
+    page_url: str,
+    keyword: str,
+    decision: str,
+    status: str,
+    owner: str = "",
+    note: str = "",
+) -> dict[str, Any]:
+    status = str(status or "suggested").strip().lower()
+    if status not in KEYWORD_ACTION_STATUSES:
+        raise ValueError("Invalid keyword action status.")
+    page_url = str(page_url or "").strip()
+    keyword = str(keyword or "").strip()
+    if not page_url or not keyword:
+        raise ValueError("Page URL and keyword are required.")
+    if len(keyword) > 500:
+        raise ValueError("Keyword is too long.")
+    owner = str(owner or "Unassigned").strip()[:255] or "Unassigned"
+    note = str(note or "").strip()[:2000]
+    decision = str(decision or "Improve existing page").strip()[:160]
+    action_key_value = keyword_action_key(page_url, keyword)
+    with SessionLocal.begin() as session:
+        action = session.scalar(
+            select(KeywordAction).where(
+                KeywordAction.website_key == website_key_value,
+                KeywordAction.action_key == action_key_value,
+            )
+        )
+        if action is None:
+            action = KeywordAction(
+                website_key=website_key_value,
+                action_key=action_key_value,
+                page_url=page_url,
+                keyword=keyword,
+            )
+            session.add(action)
+        action.page_url = page_url
+        action.keyword = keyword
+        action.decision = decision
+        action.status = status
+        action.owner = owner
+        action.note = note
+        action.completed_at = utcnow() if status == "completed" else None
+        action.updated_at = utcnow()
+        session.flush()
+        return keyword_action_dict(action)
+
+
 def website_dict(row: Website) -> dict[str, Any]:
     return {
         "key": row.key, "name": row.name, "label": row.name, "url": row.base_url,
         "base_url": row.base_url, "active": row.active, "schedule": row.schedule,
         "max_pages": row.max_pages, "exclude_paths": row.exclude_paths,
+        "budget_performance": row.budget_performance, "budget_accessibility": row.budget_accessibility,
+        "budget_seo": row.budget_seo, "budget_lcp_ms": row.budget_lcp_ms, "budget_cls": row.budget_cls,
         "created_at": iso(row.created_at), "updated_at": iso(row.updated_at), "source": "database",
     }
+
+
+def budget_score(value: Any, default: int) -> int:
+    return max(0, min(100, int(value if value not in {None, ""} else default)))
+
+
+def budget_lcp(value: Any, default: int) -> int:
+    return max(500, min(30000, int(value if value not in {None, ""} else default)))
+
+
+def budget_cls_value(value: Any, default: float) -> float:
+    return max(0.0, min(2.0, float(value if value not in {None, ""} else default)))
 
 
 def scan_dict(row: ScanJob) -> dict[str, Any]:
@@ -529,8 +774,16 @@ def issue_dict(row: AuditIssue) -> dict[str, Any]:
 
 
 def crawl_page_dict(row: CrawlPage) -> dict[str, Any]:
+    try:
+        technical_data = json.loads(row.technical_data or "{}")
+    except (TypeError, ValueError):
+        technical_data = {}
     return {
         "id": row.id, "website_key": row.website_key, "url": row.url, "title": row.title,
+        "meta_description": row.meta_description, "language": row.language,
+        "word_count": row.word_count, "h1_count": row.h1_count,
+        "content_hash": row.content_hash, "content_simhash": row.content_simhash,
+        "technical_data": technical_data,
         "status_code": row.status_code, "depth": row.depth, "source": row.source,
         "content_type": row.content_type, "error": row.error, "last_crawled_at": iso(row.last_crawled_at),
     }
@@ -539,7 +792,40 @@ def crawl_page_dict(row: CrawlPage) -> dict[str, Any]:
 def evidence_dict(row: IssueEvidence) -> dict[str, Any]:
     return {
         "id": row.id, "page_url": row.page_url, "selector": row.selector,
-        "snippet": row.snippet, "explanation": row.explanation, "captured_at": iso(row.captured_at),
+        "snippet": row.snippet, "explanation": row.explanation,
+        "screenshot_path": row.screenshot_path, "highlight": row.highlight,
+        "captured_at": iso(row.captured_at),
+    }
+
+
+def keyword_action_dict(row: KeywordAction) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "website_key": row.website_key,
+        "action_key": row.action_key,
+        "page_url": row.page_url,
+        "keyword": row.keyword,
+        "decision": row.decision,
+        "status": row.status,
+        "owner": row.owner,
+        "note": row.note,
+        "created_at": iso(row.created_at),
+        "updated_at": iso(row.updated_at),
+        "completed_at": iso(row.completed_at),
+    }
+
+
+def content_action_dict(row: ContentAction) -> dict[str, Any]:
+    try:
+        affected_urls = json.loads(row.affected_urls or "[]")
+    except (TypeError, ValueError):
+        affected_urls = []
+    return {
+        "id": row.id, "website_key": row.website_key, "action_key": row.action_key,
+        "action_type": row.action_type, "title": row.title, "primary_url": row.primary_url,
+        "affected_urls": affected_urls, "status": row.status, "owner": row.owner,
+        "note": row.note, "points": row.points, "created_at": iso(row.created_at),
+        "updated_at": iso(row.updated_at), "completed_at": iso(row.completed_at),
     }
 
 

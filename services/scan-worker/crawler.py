@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from collections import deque
+import hashlib
+import json
+import re
 from typing import Any
 from urllib.parse import urldefrag, urljoin, urlparse, urlunparse
 
@@ -80,7 +83,13 @@ def discover_sitemap_urls(session: requests.Session, base_url: str, host: str, l
 
 
 def fetch_page(session: requests.Session, url: str, depth: int, source: str) -> dict[str, Any]:
-    result: dict[str, Any] = {"url": url, "title": "", "status_code": 0, "depth": depth, "source": source, "content_type": "", "error": "", "links": []}
+    result: dict[str, Any] = {
+        "url": url, "title": "", "meta_description": "", "language": "",
+        "word_count": 0, "h1_count": 0, "content_hash": "", "content_simhash": "",
+        "technical_data": {},
+        "status_code": 0, "depth": depth,
+        "source": source, "content_type": "", "error": "", "links": [],
+    }
     try:
         response = safe_get(session, url, timeout=25)
         result["url"] = normalize_url(response.url)
@@ -89,10 +98,115 @@ def fetch_page(session: requests.Session, url: str, depth: int, source: str) -> 
         if "html" in result["content_type"].lower():
             soup = BeautifulSoup(response.text, "html.parser")
             result["title"] = soup.title.get_text(" ", strip=True) if soup.title else ""
+            description = soup.find("meta", attrs={"name": re.compile(r"^description$", re.I)})
+            result["meta_description"] = str(description.get("content") or "").strip() if description else ""
+            result["language"] = str(soup.html.get("lang") or "").strip() if soup.html else ""
+            result["h1_count"] = len(soup.find_all("h1"))
+            result["technical_data"] = extract_technical_data(soup, response)
+            for node in soup(["script", "style", "noscript", "template", "svg"]):
+                node.decompose()
+            content_root = soup.find("main") or soup.body or soup
+            visible_text = content_root.get_text(" ", strip=True)
+            result["word_count"] = len(re.findall(r"\b[\w'-]+\b", visible_text, flags=re.UNICODE))
+            result["content_hash"], result["content_simhash"] = content_fingerprints(visible_text)
             result["links"] = [str(anchor.get("href") or "") for anchor in soup.select("a[href]")]
     except requests.RequestException as exc:
         result["error"] = str(exc)
     return result
+
+
+def extract_technical_data(soup: BeautifulSoup, response: requests.Response) -> dict[str, Any]:
+    canonical_nodes = soup.select('link[rel~="canonical"]')
+    canonical = ""
+    if canonical_nodes and canonical_nodes[0].get("href"):
+        canonical = normalize_url(urljoin(response.url, str(canonical_nodes[0].get("href"))))
+    robots_node = soup.find("meta", attrs={"name": re.compile(r"^robots$", re.I)})
+    robots = str(robots_node.get("content") or "").lower().strip() if robots_node else ""
+    x_robots = str(response.headers.get("x-robots-tag") or "").lower().strip()
+    directives = ", ".join(value for value in (robots, x_robots) if value)
+    og_title = meta_property_value(soup, "og:title")
+    og_description = meta_property_value(soup, "og:description")
+
+    hreflang = []
+    invalid_hreflang = 0
+    for node in soup.select('link[rel~="alternate"][hreflang]'):
+        language = str(node.get("hreflang") or "").strip()
+        href = str(node.get("href") or "").strip()
+        if not language or not href:
+            invalid_hreflang += 1
+            continue
+        hreflang.append({"language": language, "url": normalize_url(urljoin(response.url, href))})
+
+    schema_types: set[str] = set()
+    invalid_json_ld = 0
+    for node in soup.select('script[type="application/ld+json"]'):
+        try:
+            collect_schema_types(json.loads(node.get_text(strip=True) or "{}"), schema_types)
+        except (json.JSONDecodeError, TypeError):
+            invalid_json_ld += 1
+
+    security_headers = {
+        "strict_transport_security": bool(response.headers.get("strict-transport-security")),
+        "content_security_policy": bool(response.headers.get("content-security-policy")),
+        "x_content_type_options": str(response.headers.get("x-content-type-options") or "").lower() == "nosniff",
+        "referrer_policy": bool(response.headers.get("referrer-policy")),
+        "permissions_policy": bool(response.headers.get("permissions-policy")),
+    }
+    return {
+        "canonical": canonical,
+        "canonical_count": len(canonical_nodes),
+        "canonical_cross_domain": bool(canonical and canonical_host(canonical) != canonical_host(response.url)),
+        "robots": directives,
+        "indexable": "noindex" not in directives,
+        "open_graph": {"title": og_title, "description": og_description},
+        "hreflang": hreflang,
+        "invalid_hreflang": invalid_hreflang,
+        "structured_data_types": sorted(schema_types),
+        "invalid_json_ld": invalid_json_ld,
+        "security_headers": security_headers,
+    }
+
+
+def meta_property_value(soup: BeautifulSoup, property_name: str) -> str:
+    node = soup.find("meta", attrs={"property": re.compile(f"^{re.escape(property_name)}$", re.I)})
+    return str(node.get("content") or "").strip() if node else ""
+
+
+def collect_schema_types(value: Any, types: set[str]) -> None:
+    if isinstance(value, dict):
+        schema_type = value.get("@type")
+        if isinstance(schema_type, str):
+            types.add(schema_type)
+        elif isinstance(schema_type, list):
+            types.update(str(item) for item in schema_type if item)
+        for child in value.values():
+            collect_schema_types(child, types)
+    elif isinstance(value, list):
+        for child in value:
+            collect_schema_types(child, types)
+
+
+def content_fingerprints(value: str) -> tuple[str, str]:
+    words = [
+        token.lower()
+        for token in re.findall(r"\b[\w'-]+\b", str(value or ""), flags=re.UNICODE)
+        if len(token) > 1
+    ]
+    if len(words) < 40:
+        return "", ""
+    normalized = " ".join(words)
+    exact_hash = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+    shingles = [" ".join(words[index:index + 4]) for index in range(max(1, len(words) - 3))]
+    vector = [0] * 64
+    for shingle in shingles:
+        hashed = int.from_bytes(hashlib.sha256(shingle.encode("utf-8")).digest()[:8], "big")
+        for bit in range(64):
+            vector[bit] += 1 if hashed & (1 << bit) else -1
+    simhash = 0
+    for bit, weight in enumerate(vector):
+        if weight >= 0:
+            simhash |= 1 << bit
+    return exact_hash, f"{simhash:016x}"
 
 
 def normalize_url(value: str) -> str:

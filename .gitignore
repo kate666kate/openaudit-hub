@@ -3,6 +3,8 @@ node_modules/
 .DS_Store
 outputs/reports/*
 !outputs/reports/.gitkeep
+config/search-console/*.csv
+!config/search-console/.gitkeep
 work/.cache/
 work/tmp/
 *.db
@@ -10,3 +12,4 @@ work/tmp/
 .pytest_cache/
 *.pyc
 .repo-git/
+upload-worktree/
